@@ -996,7 +996,7 @@ def export_opentepes(
     """
     os.makedirs(output_folder, exist_ok=True)
     loadlevels = _make_loadlevels(selected_hours)
-    sc_name = f"CY_{climate_year}"
+    sc_name = f"CY{climate_year}"
 
     if commodity_prices is None:
         commodity_prices = {}

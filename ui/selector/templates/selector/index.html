@@ -1,0 +1,189 @@
+{% load static %}
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Data Collector</title>
+
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+      crossorigin=""
+    />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flag-icons@7.2.3/css/flag-icons.min.css" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Space+Grotesk:wght@600;700&display=swap" />
+    <link rel="stylesheet" href="{% static 'selector/style.css' %}" />
+  </head>
+  <body>
+    {% csrf_token %}
+
+    <div class="layout">
+      <aside class="sidebar">
+
+        <!-- ── Zone 1: settings tile (fixed, never scrolls) ─────────────── -->
+        <div class="sidebar__top">
+          <div class="tile">
+            <div class="tile__title">Data Collector-NT (v1.0)</div>
+
+            <div class="tile__grid">
+
+              <div class="form-field">
+                <label class="label" for="scenario-select">Scenario</label>
+                <div class="select-wrap">
+                  <select id="scenario-select" class="select">
+                    <option value="2030">2030</option>
+                    <option value="2040">2040</option>
+                    <option value="2050">2050</option>
+                  </select>
+                </div>
+              </div>
+
+              <div class="form-field">
+                <label class="label" for="climate-year-select">Climate Year</label>
+                <div class="select-wrap">
+                  <select id="climate-year-select" class="select">
+                    <option value="2009">2009</option>
+                  </select>
+                </div>
+              </div>
+
+              <div class="form-field">
+                <label class="label" for="output-mode-select">Output Format</label>
+                <div class="select-wrap">
+                  <select id="output-mode-select" class="select">
+                    <option value="Normal">Normal</option>
+                    <option value="openTEPES">openTEPES</option>
+                  </select>
+                </div>
+              </div>
+
+              <div class="form-field">
+                <label class="label" for="hours-input">Hours per Year</label>
+                <input id="hours-input" type="number" class="input" value="8736" min="1" max="8760" />
+              </div>
+
+              <div class="tile__divider tile__divider--span2"></div>
+
+              <div class="form-field">
+                <label class="label" for="gas-pipe-select">Gas Pipeline</label>
+                <div class="select-wrap">
+                  <select id="gas-pipe-select" class="select">
+                    <option value="Existing">Existing</option>
+                    <option value="Low">Low</option>
+                    <option value="Advanced">Advanced</option>
+                    <option value="High">High</option>
+                  </select>
+                </div>
+              </div>
+
+              <div class="form-field">
+                <label class="label" for="hydrogen-pipe-select">H₂ Pipeline</label>
+                <div class="select-wrap">
+                  <select id="hydrogen-pipe-select" class="select">
+                    <option value="PCI/PMI">PCI/PMI</option>
+                    <option value="Advanced">Advanced</option>
+                    <option value="Less-Advanced">Less-Advanced</option>
+                  </select>
+                </div>
+              </div>
+
+              <div class="form-field">
+                <label class="label" for="gas-storage-select">Gas Storage</label>
+                <div class="select-wrap">
+                  <select id="gas-storage-select" class="select">
+                    <option value="Low">Low</option>
+                    <option value="Advanced">Advanced</option>
+                    <option value="High">High</option>
+                  </select>
+                </div>
+              </div>
+
+              <div class="form-field">
+                <label class="label" for="hydrogen-storage-select">H₂ Storage</label>
+                <div class="select-wrap">
+                  <select id="hydrogen-storage-select" class="select">
+                    <option value="PCI/PMI">PCI/PMI</option>
+                    <option value="Advanced">Advanced</option>
+                    <option value="Less-Advanced">Less-Advanced</option>
+                  </select>
+                </div>
+              </div>
+
+              <div class="form-field">
+                <label class="label" for="gas-terminal-select">Gas Terminal</label>
+                <div class="select-wrap">
+                  <select id="gas-terminal-select" class="select">
+                    <option value="Low">Low</option>
+                    <option value="Advanced">Advanced</option>
+                    <option value="High">High</option>
+                  </select>
+                </div>
+              </div>
+
+              <div class="form-field">
+                <label class="label" for="hydrogen-terminal-select">H₂ Terminal</label>
+                <div class="select-wrap">
+                  <select id="hydrogen-terminal-select" class="select">
+                    <option value="PCI/PMI">PCI/PMI</option>
+                    <option value="Advanced">Advanced</option>
+                    <option value="Less-Advanced">Less-Advanced</option>
+                  </select>
+                </div>
+              </div>
+
+            </div><!-- /tile__grid -->
+          </div><!-- /tile -->
+        </div><!-- /sidebar__top -->
+
+        <!-- ── Zone 2: country list (scrollable) ────────────────────────── -->
+        <div class="sidebar__countries">
+          <div class="sidebar__header">
+            <div class="title">Available Countries <span id="selection-count" class="selection-count"></span></div>
+          </div>
+          <div class="select-all">
+            <label class="select-all__label">
+              <input id="select-all-countries" type="checkbox" />
+              Select all countries
+            </label>
+          </div>
+          <div id="country-list" class="country-list"></div>
+        </div>
+
+        <!-- ── Zone 3: footer (fixed, never scrolls) ────────────────────── -->
+        <div class="sidebar__footer">
+          <button id="generate-btn" class="btn-generate" type="button">Generate</button>
+          <div id="generate-status" class="generate-status"></div>
+          <div class="credits">
+            &copy; <strong>Emad Nematbakhsh</strong> &mdash; All rights reserved.<br/>
+            <a class="credits__link" href="https://www.iit.comillas.edu/" target="_blank" rel="noopener">IIT</a>
+            &nbsp;·&nbsp;
+            <a class="credits__link" href="https://www.comillas.edu/en/" target="_blank" rel="noopener">Comillas Pontifical University</a>
+          </div>
+        </div>
+
+      </aside>
+
+      <main class="main">
+        <div id="map" class="map"></div>
+        <a class="map-signature" href="https://github.com/EmadNB?tab=repositories" target="_blank" rel="noopener" title="Emad NB · GitHub">
+          <img src="{% static 'selector/signature.png' %}" alt="Emad NB" />
+        </a>
+      </main>
+    </div>
+
+    <script id="countries-data" type="application/json">
+      {{ countries_json|safe }}
+    </script>
+
+    <script
+      src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+      integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+      crossorigin=""
+    ></script>
+    <script src="{% static 'selector/app.js' %}"></script>
+  </body>
+</html>

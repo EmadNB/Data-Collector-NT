@@ -1,0 +1,31 @@
+# Virtual environments (NOT portable across machines — recreated by run.bat)
+collector-venv/
+.venv/
+venv/
+env/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.Python
+
+# Django
+ui/db.sqlite3
+*.log
+
+# Raw TYNDP source data (large ENTSO-E / ENTSO-G files, not distributed)
+collector/inputs/
+
+# openTEPES solving workspace (notebook + local solve in/outputs) — kept out of the repo
+/openTEPES/
+
+# Generated outputs
+collector/outputs/HTMLs/
+collector/outputs/Excel Files/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

@@ -419,7 +419,7 @@ def _write_data_static(
         "ENSCost": 10000, "HNSCost": 10000, "HTNSCost": 10000,
         "CO2Cost": round(co2_cost, 4), "UpReserveActivation": 0, "DwReserveActivation": 0,
         "MinRatioDwUp": 0, "MaxRatioDwUp": 1, "SBase": 100,
-        "ReferenceNode": zones[0], "TimeStep": 1,
+        "ReferenceNode": zones[0], "TimeStep": 2,
         "EconomicBaseYear": scenario, "AnnualDiscountRate": 0,
     }]))
 
@@ -837,6 +837,16 @@ def _write_variable_profiles(
     # Full generator label list (all generators, in gen_rows order)
     all_gen_names = [r["Generator"] for r in gen_rows]
 
+    # Generators whose profile is zero at every load level (e.g. zero installed
+    # capacity): keep them at 0 rather than applying the 1 W floor, so we don't
+    # invent 1 W of capacity for a generator that produces nothing all year.
+    all_zero_gens: set[str] = set()
+    for gn, arr in col_data.items():
+        vals = np.asarray(arr[:len(loadlevels)], dtype=float)
+        vals = vals[~np.isnan(vals)]
+        if vals.size == 0 or not np.any(np.round(vals, 4) != 0):
+            all_zero_gens.add(gn)
+
     # VariableMaxGeneration: keep computed values, add remaining generators empty.
     rows = []
     for i, ll in enumerate(loadlevels):
@@ -848,7 +858,12 @@ def _write_variable_profiles(
                     row[gn] = ""
                 else:
                     fv = round(float(v), 4)
-                    row[gn] = fv if fv != 0 else 1e-6  # 1 W floor when CF×capacity is 0
+                    if fv != 0:
+                        row[gn] = fv
+                    elif gn in all_zero_gens:
+                        row[gn] = ""       # all-zero/empty column: leave blank, no floor
+                    else:
+                        row[gn] = 1e-6     # 1 W floor when CF×capacity is 0 this hour
             else:
                 row[gn] = ""
         rows.append(row)

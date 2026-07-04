@@ -32,6 +32,7 @@ public datasets.
   - [Processing.log](#processinglog)
 - [Data sources](#data-sources)
 - [Data limitations by scenario](#data-limitations-by-scenario)
+- [License](#license)
 - [Credits](#credits)
 
 ---
@@ -266,9 +267,16 @@ Always check `Processing.log` after a run — any skipped source file is reporte
 
 ---
 
+## License
+
+Released under the [MIT License](LICENSE) — © 2026 **Emad Nematbakhsh**.
+
+The ENTSO-E / ENTSO-G TYNDP source data is **not** covered by this license and remains
+subject to its original terms.
+
 ## Credits
 
-© **Emad Nematbakhsh** — All rights reserved.
+© **Emad Nematbakhsh**
 [IIT](https://www.iit.comillas.edu/) · [Comillas Pontifical University](https://www.comillas.edu/en/)
 
 Data © [ENTSO-E](https://www.entsoe.eu/) and [ENTSO-G](https://www.entsog.eu/) (TYNDP).

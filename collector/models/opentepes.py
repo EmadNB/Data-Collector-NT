@@ -1029,16 +1029,16 @@ def export_opentepes(
         zone_to_area[z] = area
     unique_areas: list[str] = list(dict.fromkeys(zone_to_area.values()))
 
-    # FCR (total) reserve per area = sum of member zones' Total (FCR) (MW/h)
+    # FRR (total) reserve per area = sum of member zones' Total (FRR) (MW/h)
     area_fcr: dict[str, float] = {a: 0.0 for a in unique_areas}
     if isinstance(reserve_df, pd.DataFrame) and "Code" in reserve_df.columns \
-            and "Total (FCR) (MW/h)" in reserve_df.columns:
+            and "Total (FRR) (MW/h)" in reserve_df.columns:
         for z in selected_zones:
             row = reserve_df[reserve_df["Code"] == z]
             if row.empty:
                 continue
             try:
-                val = float(row["Total (FCR) (MW/h)"].iloc[0])
+                val = float(row["Total (FRR) (MW/h)"].iloc[0])
             except (TypeError, ValueError):
                 continue
             if val == val:  # not NaN

@@ -498,8 +498,9 @@ def _write_generation(
             "Efficiency": r.get("Efficiency", ""),  # blank = use LinearTerm as heat rate
             "ShiftTime": 0,
             "EFOR":      r.get("EFOR", 0),
-            "RampUp":    r.get("RampUp", 0),
-            "RampDown":  r.get("RampDown", 0),
+            # Ramp rates intentionally left blank (not modelled).
+            "RampUp":    "",
+            "RampDown":  "",
             "UpTime": 0, "DownTime": 0, "StableTime": 0,
             "FuelCost":       r.get("FuelCost", 0),
             "LinearTerm":     round(1.0 / r["LinearTermEff"], 6) if r.get("LinearTermEff") else 1,
@@ -763,13 +764,27 @@ def _write_demand(
         demand_data[f"{zone}_Exp"] = list(exp_demand)
 
     all_nodes = list(zones) + [f"{z}_H2" for z in zones] + [f"{z}_Exp" for z in zones]
+
+    # Nodes whose demand is zero at every load level: keep them at 0 rather than
+    # applying the 1 W floor (don't invent demand for a node that never has any).
+    all_zero_nodes = {
+        node for node in all_nodes
+        if not any(round(float(x), 4) != 0 for x in demand_data[node])
+    }
+
     rows = []
     for i, ll in enumerate(loadlevels):
         row: dict = {"Period": scenario, "Scenario": sc_name, "LoadLevel": ll}
         for node in all_nodes:
             col = demand_data[node]
             v = float(col[i]) if i < len(col) else 0.0
-            row[node] = round(v, 4) if v != 0 else 1e-6  # 1 W floor when demand is 0
+            fv = round(v, 4)
+            if fv != 0:
+                row[node] = fv
+            elif node in all_zero_nodes:
+                row[node] = ""       # all-zero column: leave blank, no floor
+            else:
+                row[node] = 1e-6     # 1 W floor when demand is 0 this hour
         rows.append(row)
     _csv(folder, "oT_Data_Demand.csv", pd.DataFrame(rows))
 
@@ -916,10 +931,12 @@ def _write_variable_profiles(
             inflow_cols[gn] = ["" for _ in loadlevels]
             continue
         period_hours = flow[1]
-        inflow_cols[gn] = [
+        vals = [
             round(float(series[min(h // period_hours, len(series) - 1)]), 6)
             for h in range(len(loadlevels))
         ]
+        # All-zero inflow column: leave blank rather than writing zeros.
+        inflow_cols[gn] = ["" for _ in vals] if not any(v != 0 for v in vals) else vals
 
     inflow_rows = []
     for i, ll in enumerate(loadlevels):

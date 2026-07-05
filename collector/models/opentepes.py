@@ -1018,14 +1018,14 @@ def export_opentepes(
     if lignite_groups is None:
         lignite_groups = {}
 
-    # Build zone -> area mapping (country name, spaces replaced with "_")
+    # Build zone -> area mapping from the Nodes "Country" column (spaces -> "_")
     zone_to_area: dict[str, str] = {}
     for z in selected_zones:
         area = z  # fallback: use zone code itself
-        if isinstance(node_df, pd.DataFrame) and {"Code", "Location"}.issubset(node_df.columns):
+        if isinstance(node_df, pd.DataFrame) and {"Code", "Country"}.issubset(node_df.columns):
             match = node_df[node_df["Code"] == z]
             if not match.empty:
-                area = _clean_area(match["Location"].iloc[0])
+                area = _clean_area(match["Country"].iloc[0])
         zone_to_area[z] = area
     unique_areas: list[str] = list(dict.fromkeys(zone_to_area.values()))
 

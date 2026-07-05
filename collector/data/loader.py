@@ -486,14 +486,18 @@ def load_reserve_requirements(
             def _cell(row: int) -> float:
                 return _read_scalar(filepath, "Reserves", "C", row)
 
+            # Reserves sheet orders each block Total -> Thermal -> Hydro:
+            #   FCR: Total=C10, Thermal=C11, Hydro=C12
+            #   FRR: Total=C16, Thermal=C17, Hydro=C18
+            # (_cell(n) reads C{n+1}).
             rows.append({
                 "Code":                  code,
-                "Thermal (FCR) (MW/h)":  _cell(9),
-                "Hydro (FCR) (MW/h)":    _cell(10),
-                "Total (FCR) (MW/h)":    _cell(11),
-                "Thermal (FRR) (MW/h)":  _cell(15),
-                "Hydro (FRR) (MW/h)":    _cell(16),
-                "Total (FRR) (MW/h)":    _cell(17),
+                "Total (FCR) (MW/h)":    _cell(9),
+                "Thermal (FCR) (MW/h)":  _cell(10),
+                "Hydro (FCR) (MW/h)":    _cell(11),
+                "Total (FRR) (MW/h)":    _cell(15),
+                "Thermal (FRR) (MW/h)":  _cell(16),
+                "Hydro (FRR) (MW/h)":    _cell(17),
             })
             print(f"Reserve requirements for {code}: OK")
         except FileNotFoundError:

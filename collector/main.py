@@ -103,7 +103,8 @@ def run(
         selected_climate_year (int): Climate year for which profile data is
             extracted (e.g. ``2009``).  Defaults to ``2009``.
         selected_zones (list[str] | None): Zone codes to collect data for
-            (e.g. ``["ES00", "PT00", "FR00"]``).  Defaults to that triple.
+            (e.g. ``["ES00", "PT00", "FR00"]``).  Required — a ``ValueError`` is
+            raised (nothing is generated) when empty or ``None``.
         selected_hours (int): Number of hourly time steps per year to read.
             Defaults to ``8736``.
         selected_gas_pipe (str): Gas pipeline capacity scenario.  One of
@@ -133,8 +134,8 @@ def run(
         >>> from collector.main import run
         >>> run(selected_scenario=2030, selected_zones=["ES00", "PT00"])
     """
-    if selected_zones is None:
-        selected_zones = ["ES00", "PT00", "FR00"]
+    if not selected_zones:
+        raise ValueError("No zones selected — nothing to generate.")
 
     # Validate inputs
     validate_scenario(selected_scenario)

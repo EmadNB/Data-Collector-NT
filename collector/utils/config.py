@@ -145,8 +145,8 @@ PECD_FILE_TEMPLATES: dict[str, dict[int, str]] = {
 
 HYDRO_FILE_TEMPLATES: dict[int, str] = {
     2030: r"inputs\Hydro Inflows\2030\PEMMDB_{}_Hydro_Inflows_2030.xlsx",
-    2040: r"inputs\Hydro Inflows\2040\PEMMDB_{}_Hydro_Inflows_2030.xlsx",
-    2050: r"inputs\Hydro Inflows\2050\PEMMDB_{}_Hydro_Inflows_2030.xlsx",
+    2040: r"inputs\Hydro Inflows\2040\PEMMDB_{}_Hydro_Inflows_2040.xlsx",
+    2050: r"inputs\Hydro Inflows\2050\PEMMDB_{}_Hydro_Inflows_2050.xlsx",
 }
 
 HYDRO_SHEET_NAMES: dict[str, str] = {

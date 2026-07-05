@@ -258,9 +258,8 @@ aware of the following:
 | Limitation | Affected scenario(s) | Effect |
 | --- | --- | --- |
 | **Hydrogen demand profiles** are only published for 2030 and 2040 | **2050** | Generating for 2050 raises an error / omits H₂ demand; H₂-into-electricity demand conversion is unavailable. |
-| **Cross-border exchange** files (`MMStandardOutputFile_NT…`) exist only for 2030 and 2040 | **2050** | External-zone exchange series are unavailable, so exports-to-demand contributions are zero. |
+| **Cross-border exchange** results are published only for the **2009 climate year**, and only for the **2030 and 2040** scenarios | **2050**, and **any non-2009 climate year** | For **2050** the exchange series are unavailable, so exports-to-demand contributions are zero. For **2030 / 2040** the exchange always uses **climate year 2009**, regardless of the climate year you select — the selection is ignored for exchanges. |
 | **Gas price is not available for the 2050 scenario** — the *Gas blend NT+* row has no 2050 value in the TYNDP price sheet | **2050** | `Gas Price (EUR/MWh)` is unavailable and falls back to 0 for 2050. |
-| **Hydro inflow** workbooks currently reference the 2030 PEMMDB file for all years | 2040 / 2050 | Hydro energy inflows use 2030 inflow data as a proxy. |
 | Some technologies / DSR types may be absent for a given zone | any | Missing entries are skipped rather than written as zero rows. |
 
 Always check `Processing.log` after a run — any skipped source file is reported there.

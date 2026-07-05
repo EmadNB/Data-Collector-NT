@@ -163,7 +163,14 @@ _PROFILE_TO_SUFFIX: dict[str, str] = {
 # Helpers
 # ---------------------------------------------------------------------------
 
+# Suffix appended to every openTEPES CSV filename (e.g. "_NT2030"), set by
+# export_opentepes so files are written with the NT{Period} tag from the start.
+_FILE_SUFFIX = ""
+
+
 def _csv(folder: str, name: str, df: pd.DataFrame) -> None:
+    if _FILE_SUFFIX and name.endswith(".csv"):
+        name = f"{name[:-4]}{_FILE_SUFFIX}.csv"
     df.to_csv(os.path.join(folder, name), index=False)
 
 
@@ -1027,6 +1034,10 @@ def export_opentepes(
         output_folder:  Destination directory for CSV files.
     """
     os.makedirs(output_folder, exist_ok=True)
+    # Tag every file with an _NT{Period} suffix as it is written (e.g.
+    # oT_Data_Generation_NT2030.csv). The output folder is wiped before each run.
+    global _FILE_SUFFIX
+    _FILE_SUFFIX = f"_NT{scenario}"
     loadlevels = _make_loadlevels(selected_hours)
     sc_name = f"CY{climate_year}"
 
@@ -1185,18 +1196,5 @@ def export_opentepes(
     # oT_Data_DemandHydrogen table, so the H2 network file is intentionally not written.
     _write_variable_profiles(output_folder, profiles_df, tech_cap_df, gen_rows, selected_hours, scenario, loadlevels, sc_name)
     _write_reserve_files(output_folder, scenario, loadlevels, sc_name, unique_areas, area_fcr)
-
-    # Tag every output file with an _NT{Period} suffix (e.g. oT_Data_Generation_NT2030.csv)
-    # so a run's CSVs are self-identifying. The notebook strips this suffix before
-    # applying openTEPES' own CaseName suffix when copying.
-    suffix = f"_NT{scenario}"
-    for fn in os.listdir(output_folder):
-        if not (fn.startswith("oT_") and fn.endswith(".csv")):
-            continue
-        base = fn[:-4]
-        if base.endswith(suffix):
-            continue
-        os.replace(os.path.join(output_folder, fn),
-                   os.path.join(output_folder, f"{base}{suffix}.csv"))
 
     print(f"openTEPES CSV files written to: {output_folder}")

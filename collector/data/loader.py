@@ -78,7 +78,9 @@ def load_network_edges(
     Example:
         >>> edges_e, edges_g, edges_h = load_network_edges(2030)
     """
-    edges_e = pd.read_excel(filepath, sheet_name=f"Lines_E ({scenario})")
+    # Only one electricity network exists, so its sheet is period-independent
+    # (named simply "Lines_E"); gas and hydrogen remain per-scenario.
+    edges_e = pd.read_excel(filepath, sheet_name="Lines_E")
     edges_g = pd.read_excel(filepath, sheet_name=f"Lines_G ({scenario})")
     edges_h = pd.read_excel(filepath, sheet_name=f"Lines_H ({scenario})")
     return edges_e, edges_g, edges_h

@@ -4,8 +4,12 @@ from __future__ import annotations
 
 import re
 import openpyxl
+from openpyxl.utils import get_column_letter
 import numpy as np
 import pandas as pd
+
+# Other Non-RES has up to 27 type columns (C..AC) on its PEMMDB sheet.
+_OTHER_NONRES_COLS = [get_column_letter(3 + i) for i in range(27)]
 
 from collector.utils.config import (
     FILEPATH_CO2_FACTORS,
@@ -277,7 +281,8 @@ def _read_res_capacities(filepath: str, data: dict) -> None:
     data["Solar (rooftop) (MW)"]                 = _cell("Solar",     "B", 9, 1000)
     data["Solar (thermal_with_storage) (MW)"]    = _cell("Solar",     "B", 10, 1000)
     data["Solar (thermal_with_storage) (MWh)"]   = _cell("Solar",     "B", 11, 1000)
-    data["Other Non-RES (MW)"]                   = _cell("Other Non-RES", "C", 8)
+    for _i, _col in enumerate(_OTHER_NONRES_COLS):
+        data[f"Other Non-RES{_i+1} (MW)"] = _cell("Other Non-RES", _col, 8)
     data["Other RES (biomass) (MW)"]             = _cell("Other RES", "E", 8)
     data["Other RES (geothermal) (MW)"]          = _cell("Other RES", "F", 8)
     data["Other RES (marine) (MW)"]              = _cell("Other RES", "G", 8)
@@ -305,7 +310,8 @@ def _read_timeseries_capacities(filepath: str, data: dict, selected_hours: int) 
             skiprows=row, nrows=selected_hours,
         ).to_numpy()
 
-    data["Other Non-RES (MW/h)"]          = _ts("Other Non-RES", "C", 18)
+    for _i, _col in enumerate(_OTHER_NONRES_COLS):
+        data[f"Other Non-RES{_i+1} (MW/h)"] = _ts("Other Non-RES", _col, 18)
     data["Exports_non_ENTSOe (MW/h)"]     = -_ts("Exchanges",   "C", 28)
     for _i, _col in enumerate("CDEFGHIJKL"):
         data[f"DSR{_i+1} (MW/h)"] = _ts("DSR", _col, 15)
@@ -409,15 +415,16 @@ def _read_single_zone_characteristics(
     dc["Net maximum capacity - generation perspective (MW)"] = zeros26.copy()
     dc["Net maximum capacity - demand perspective (MW)"]     = zeros26.copy()
 
-    # Other Non-RES
-    for key in ("Fixed Generation Reduction (%)", "Ramp-Up Rate (MW/h)", "Ramp-Down Rate (MW/h)"):
-        dc[key] = np.append(dc[key], 0)
-    dc["Number of Units"]   = np.append(dc["Number of Units"],   _cell(filepath, "Other Non-RES", "C", 9))
-    dc["Price (EUR/MWh)"]   = np.append(dc["Price (EUR/MWh)"],   _cell(filepath, "Other Non-RES", "C", 12))
-    dc["Efficiency (%)"]    = np.append(dc["Efficiency (%)"],    _cell(filepath, "Other Non-RES", "C", 13))
-    dc["CO2 Factor (ton/MWh)"] = np.append(dc["CO2 Factor (ton/MWh)"], _cell(filepath, "Other Non-RES", "C", 14))
-    dc["Net maximum capacity - generation perspective (MW)"] = np.append(dc["Net maximum capacity - generation perspective (MW)"], 0)
-    dc["Net maximum capacity - demand perspective (MW)"]     = np.append(dc["Net maximum capacity - demand perspective (MW)"], 0)
+    # Other Non-RES1..27 (each successive column C..AC in the Other Non-RES sheet)
+    for _col in _OTHER_NONRES_COLS:
+        for key in ("Fixed Generation Reduction (%)", "Ramp-Up Rate (MW/h)", "Ramp-Down Rate (MW/h)"):
+            dc[key] = np.append(dc[key], 0)
+        dc["Number of Units"]   = np.append(dc["Number of Units"],   _cell(filepath, "Other Non-RES", _col, 9))
+        dc["Price (EUR/MWh)"]   = np.append(dc["Price (EUR/MWh)"],   _cell(filepath, "Other Non-RES", _col, 12))
+        dc["Efficiency (%)"]    = np.append(dc["Efficiency (%)"],    _cell(filepath, "Other Non-RES", _col, 13))
+        dc["CO2 Factor (ton/MWh)"] = np.append(dc["CO2 Factor (ton/MWh)"], _cell(filepath, "Other Non-RES", _col, 14))
+        dc["Net maximum capacity - generation perspective (MW)"] = np.append(dc["Net maximum capacity - generation perspective (MW)"], 0)
+        dc["Net maximum capacity - demand perspective (MW)"]     = np.append(dc["Net maximum capacity - demand perspective (MW)"], 0)
 
     # DSR1-DSR10 (each successive column in the DSR sheet)
     for _col in "CDEFGHIJKL":

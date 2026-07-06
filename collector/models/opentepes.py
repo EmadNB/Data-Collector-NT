@@ -58,7 +58,7 @@ _CHAR_POWER_ENTRIES: dict[str, tuple[str, str, int]] = {
     "Battery (MWh)": (
         "Net maximum capacity - generation perspective (MW)",
         "Net maximum capacity - demand perspective (MW)",
-        37,
+        63,
     ),
 }
 
@@ -90,9 +90,9 @@ _TECH_ENTRIES: list[tuple[str, str, str, bool, int | None]] = [
     ("Gas (ccgt_pre2) (MW)",   "Gas_pre2",     "Gas",          False, 23),
     ("Hydrogen (fc) (MW)",     "H2_fc",        "Hydrogen",     False, 24),
     ("Hydrogen (ccgt) (MW)",   "H2_ccgt",      "Hydrogen",     False, 25),
-    ("Other Non-RES (MW)",     "OtherNonRES",  "Other",        False, 26),
-    *[(f"DSR{i+1} (MW)", f"DSR{i+1}", "DSR", False, 27 + i) for i in range(10)],
-    ("Battery (MWh)",          "Battery",      "Battery",      False, 37),
+    *[(f"Other Non-RES{i+1} (MW)", f"OtherNonRES{i+1}", "Other", False, 26 + i) for i in range(27)],
+    *[(f"DSR{i+1} (MW)", f"DSR{i+1}", "DSR", False, 53 + i) for i in range(10)],
+    ("Battery (MWh)",          "Battery",      "Battery",      False, 63),
     ("Electrolyser (MW)",      "Electr",       "Electrolyser", False, None),
     # â"€â"€ RES â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
     ("Wind (onshore) (MW)",    "WindOn",       "Wind",         True,  None),
@@ -739,7 +739,7 @@ def _write_demand(
     export_df: pd.DataFrame | None = None,
 ) -> None:
     # char index of the Electrolyser row in the tech-characteristic arrays
-    _ELECTROLYSER_IDX = 38
+    _ELECTROLYSER_IDX = 64
     demand_data: dict[str, list] = {}
     for zone in zones:
         # Electricity demand on the electricity node (unchanged)
@@ -836,7 +836,6 @@ def _write_variable_profiles(
     # Techs whose VariableMaxGeneration comes straight from an hourly (MW/h)
     # timeseries in tech_cap_df (used directly, no capacity multiplication).
     _DIRECT_HOURLY = {
-        "Other Non-RES (MW)":         "Other Non-RES (MW/h)",
         "Other RES (biomass) (MW)":   "Other RES (biomass) (MW/h)",
         "Other RES (geothermal) (MW)": "Other RES (geothermal) (MW/h)",
         "Other RES (marine) (MW)":    "Other RES (marine) (MW/h)",
@@ -847,7 +846,8 @@ def _write_variable_profiles(
         cap_col = r.get("cap_col", "")
         if cap_col in _DIRECT_HOURLY:
             ts_col = _DIRECT_HOURLY[cap_col]
-        elif cap_col.startswith("DSR") and cap_col.endswith("(MW)"):
+        elif (cap_col.startswith("DSR") or cap_col.startswith("Other Non-RES")) \
+                and cap_col.endswith("(MW)"):
             ts_col = cap_col.replace("(MW)", "(MW/h)")
         else:
             continue
@@ -1076,20 +1076,30 @@ def export_opentepes(
     all_technologies: list[str] = []
 
     for zone in selected_zones:
-        # DSR columns with capacity present in this zone
+        # DSR / Other Non-RES columns with capacity present in this zone
         _single_dsr = len([
             c for c, *_ in _TECH_ENTRIES
             if c.startswith("DSR") and _col_val(tech_cap_df, zone, c) != 0
         ]) == 1
+        _single_onr = len([
+            c for c, *_ in _TECH_ENTRIES
+            if c.startswith("Other Non-RES") and _col_val(tech_cap_df, zone, c) != 0
+        ]) == 1
         for cap_col, suffix, ot_tech, is_res, char_idx in _TECH_ENTRIES:
-            # Skip DSR types that have no capacity in this zone
-            if cap_col.startswith("DSR") and _col_val(tech_cap_df, zone, cap_col) == 0:
+            # Skip DSR / Other Non-RES types that have no capacity in this zone
+            if (cap_col.startswith("DSR") or cap_col.startswith("Other Non-RES")) \
+                    and _col_val(tech_cap_df, zone, cap_col) == 0:
                 continue
 
             if cap_col.startswith("DSR"):
                 # Single DSR type → label "DSR"; Technology is always "DSR"
                 gen_label = "DSR" if _single_dsr else _tech_label(cap_col)
                 tech_lbl  = "DSR"
+            elif cap_col.startswith("Other Non-RES"):
+                # Single Other Non-RES type → label "Other_Non_RES"; Technology
+                # is always "Other_Non_RES"
+                gen_label = "Other_Non_RES" if _single_onr else _tech_label(cap_col)
+                tech_lbl  = "Other_Non_RES"
             else:
                 gen_label = tech_lbl = _tech_label(cap_col)
             gen_name = f"{zone}_{gen_label}"

@@ -167,15 +167,18 @@ def export_zone_data(
 
     df_mw  = zone_df[id_col + mw_cols].T.reset_index()
     df_mw.columns  = ["Parameter", "Value"]
-    # Remove zero-capacity DSR entries from Technology Capacities sheet
-    _dsr_zero = df_mw["Parameter"].str.startswith("DSR", na=False) & (
+    # Remove zero-capacity DSR / Other Non-RES entries from Technology Capacities sheet
+    _multi_zero = df_mw["Parameter"].str.startswith(("DSR", "Other Non-RES"), na=False) & (
         pd.to_numeric(df_mw["Value"], errors="coerce").fillna(0) == 0
     )
-    df_mw = df_mw[~_dsr_zero]
-    # If only one DSR type is present, relabel "DSR1" → "DSR"
+    df_mw = df_mw[~_multi_zero]
+    # If only one DSR / Other Non-RES type is present, relabel "<x>1" → "<x>"
     _single_dsr = df_mw["Parameter"].str.startswith("DSR", na=False).sum() == 1
+    _single_onr = df_mw["Parameter"].str.startswith("Other Non-RES", na=False).sum() == 1
     if _single_dsr:
         df_mw["Parameter"] = df_mw["Parameter"].replace({"DSR1 (MW)": "DSR (MW)"})
+    if _single_onr:
+        df_mw["Parameter"] = df_mw["Parameter"].replace({"Other Non-RES1 (MW)": "Other Non-RES (MW)"})
     df_mwh = zone_df[id_col + mwh_cols].T.reset_index()
     df_mwh.columns = ["Parameter", "Value"]
 
@@ -187,7 +190,7 @@ def export_zone_data(
         values = _extract_array_values(cell)
         if not values:
             continue
-        if col.startswith("DSR") and all(v == 0 or v != v for v in values):
+        if col.startswith(("DSR", "Other Non-RES")) and all(v == 0 or v != v for v in values):
             continue
         hourly_data[col] = values
         max_len = max(max_len, len(values))
@@ -221,6 +224,8 @@ def export_zone_data(
     merged = merged.fillna(0)
     if _single_dsr:
         merged = merged.rename(columns={"DSR1 (MW/h)": "DSR (MW/h)"})
+    if _single_onr:
+        merged = merged.rename(columns={"Other Non-RES1 (MW/h)": "Other Non-RES (MW/h)"})
 
     # Reserve requirements
     reserve_zone = (
@@ -240,11 +245,11 @@ def export_zone_data(
     # Technology characteristics
     tech_char_excel = _build_tech_char_excel(tech_char_df, zone_name)
 
-    # Drop DSR rows where the installed capacity is zero or absent
+    # Drop DSR / Other Non-RES rows where the installed capacity is zero or absent
     if not tech_char_excel.empty:
         rows_to_drop = []
         for _rt in list(tech_char_excel.index):
-            if not str(_rt).startswith("DSR"):
+            if not str(_rt).startswith(("DSR", "Other Non-RES")):
                 continue
             _cap_col = str(_rt)
             if _cap_col not in tech_cap_df.columns:
@@ -264,6 +269,8 @@ def export_zone_data(
             tech_char_excel = tech_char_excel.drop(index=rows_to_drop, errors="ignore")
         if _single_dsr:
             tech_char_excel = tech_char_excel.rename(index={"DSR1 (MW)": "DSR (MW)"})
+        if _single_onr:
+            tech_char_excel = tech_char_excel.rename(index={"Other Non-RES1 (MW)": "Other Non-RES (MW)"})
 
     # Inject "Fuel (EUR/MWh)" column from TYNDP commodity prices
     if commodity_prices and not tech_char_excel.empty:

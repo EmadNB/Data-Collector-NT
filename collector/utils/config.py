@@ -43,7 +43,7 @@ TECH_COLUMNS = [
     "Oil shale (old) (MW)", "Oil shale (new) (MW)",
     "Gas (ccgt_pre1) (MW)", "Gas (ccgt_pre2) (MW)",
     "Hydrogen (fc) (MW)", "Hydrogen (ccgt) (MW)",
-    "Other Non-RES (MW)",
+    *[f"Other Non-RES{i+1} (MW)" for i in range(27)],
     *[f"DSR{i+1} (MW)" for i in range(10)],
     "Battery (MWh)", "Electrolyser (MW)",
     "Wind (onshore) (MW)", "Wind (offshore) (MW)",
@@ -61,7 +61,8 @@ TECH_COLUMNS = [
     *[f"DSR{i+1} (MW/h)" for i in range(10)],
     "Other RES (biomass) (MW/h)", "Other RES (geothermal) (MW/h)",
     "Other RES (marine) (MW/h)", "Other RES (waste) (MW/h)",
-    "Other RES (unknown) (MW/h)", "Other Non-RES (MW/h)",
+    "Other RES (unknown) (MW/h)",
+    *[f"Other Non-RES{i+1} (MW/h)" for i in range(27)],
 ]
 
 TECH_CHAR_COLUMNS = [

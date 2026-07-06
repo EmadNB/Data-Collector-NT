@@ -27,6 +27,7 @@ from __future__ import annotations
 import os
 
 from collector.data.loader import (
+    clear_excel_cache,
     load_all_profiles,
     load_commodity_prices,
     load_lignite_groups,
@@ -189,6 +190,9 @@ def _pipeline(
     generate_html: bool = False,
 ) -> None:
     """Internal pipeline implementation (all paths relative to cwd)."""
+
+    # Start each run with a clean workbook cache so edited inputs are re-read.
+    clear_excel_cache()
 
     # ── Step 1: directories ──────────────────────────────────────────────────
     create_output_directories(".")

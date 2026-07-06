@@ -90,6 +90,7 @@ def run(
     selected_gas_terminal: str = "Low",
     selected_hydrogen_terminal: str = "PCI/PMI",
     selected_output: str = "Normal",
+    selected_generate_html: bool = False,
     base_path: str = ".",
 ) -> None:
     """Execute the full data collection, processing, visualisation, and export pipeline.
@@ -121,6 +122,8 @@ def run(
             One of :data:`~collector.utils.config.HYDROGEN_TERMINAL_OPTIONS`.
         selected_output (str): Output format – ``'Normal'`` or
             ``'openTEPES'``.  Defaults to ``'Normal'``.
+        selected_generate_html (bool): Whether to render the HTML chart / map
+            visualisations.  Defaults to ``False`` (no HTML output).
         base_path (str): Working directory containing the ``Data/`` folder
             and where ``Outputs/`` will be created.  Defaults to ``'.'``.
 
@@ -164,6 +167,7 @@ def run(
             gas_terminal=selected_gas_terminal,
             hydrogen_terminal=selected_hydrogen_terminal,
             output_mode=selected_output,
+            generate_html=selected_generate_html,
         )
     finally:
         if base_path != ".":
@@ -182,6 +186,7 @@ def _pipeline(
     gas_terminal: str,
     hydrogen_terminal: str,
     output_mode: str,
+    generate_html: bool = False,
 ) -> None:
     """Internal pipeline implementation (all paths relative to cwd)."""
 
@@ -234,45 +239,49 @@ def _pipeline(
     commodity_prices = load_commodity_prices(scenario)
     lignite_groups   = load_lignite_groups()
 
-    # ── Step 7: capacity visualisations ─────────────────────────────────────
-    print("\n=== Plotting capacity charts ===")
-    zone_to_display = build_zone_display_map(node_df, zones)
-    plot_capacity_by_technology(
-        tech_cap_df, zones, zone_to_display,
-        os.path.join(html_dir, "Technology Capacities (ver.1).html"),
-    )
-    plot_storage_capacity_by_technology(
-        tech_cap_df, zones, zone_to_display,
-        os.path.join(html_dir, "Storage Capacities (ver.1).html"),
-    )
-    plot_capacity_by_zone(
-        tech_cap_df, zones, zone_to_display,
-        os.path.join(html_dir, "Technology Capacities (ver.2).html"),
-    )
-    plot_storage_capacity_by_zone(
-        tech_cap_df, zones, zone_to_display,
-        os.path.join(html_dir, "Storage Capacities (ver.2).html"),
-    )
+    # ── Steps 7–10: HTML visualisations (optional) ──────────────────────────
+    if generate_html:
+        # Step 7: capacity visualisations
+        print("\n=== Plotting capacity charts ===")
+        zone_to_display = build_zone_display_map(node_df, zones)
+        plot_capacity_by_technology(
+            tech_cap_df, zones, zone_to_display,
+            os.path.join(html_dir, "Technology Capacities (ver.1).html"),
+        )
+        plot_storage_capacity_by_technology(
+            tech_cap_df, zones, zone_to_display,
+            os.path.join(html_dir, "Storage Capacities (ver.1).html"),
+        )
+        plot_capacity_by_zone(
+            tech_cap_df, zones, zone_to_display,
+            os.path.join(html_dir, "Technology Capacities (ver.2).html"),
+        )
+        plot_storage_capacity_by_zone(
+            tech_cap_df, zones, zone_to_display,
+            os.path.join(html_dir, "Storage Capacities (ver.2).html"),
+        )
 
-    # ── Step 8: profile visualisations ──────────────────────────────────────
-    print("\n=== Plotting profile time series ===")
-    plot_profiles(profiles_df, zones, node_df, hours, html_dir)
+        # Step 8: profile visualisations
+        print("\n=== Plotting profile time series ===")
+        plot_profiles(profiles_df, zones, node_df, hours, html_dir)
 
-    # ── Step 9: availability report ──────────────────────────────────────────
-    print("\n=== Writing availability report ===")
-    plot_availability_report(
-        profiles_df, node_df, scenario, climate_year,
-        os.path.join(html_dir, "Report Table.html"),
-    )
+        # Step 9: availability report
+        print("\n=== Writing availability report ===")
+        plot_availability_report(
+            profiles_df, node_df, scenario, climate_year,
+            os.path.join(html_dir, "Report Table.html"),
+        )
 
-    # ── Step 10: network maps ────────────────────────────────────────────────
-    print("\n=== Rendering network maps ===")
-    m_el  = plot_electricity_network_map(node_df, edges_e, zones, scenario)
-    m_gas = plot_gas_network_map(node_df, edges_g, zones, scenario)
-    m_h2  = plot_hydrogen_network_map(node_df, edges_h, zones, scenario)
-    m_el.save(os.path.join(html_dir, "Electricity Network Map.html"))
-    m_gas.save(os.path.join(html_dir, "Gas Network Map.html"))
-    m_h2.save(os.path.join(html_dir, "Hydrogen Network Map.html"))
+        # Step 10: network maps
+        print("\n=== Rendering network maps ===")
+        m_el  = plot_electricity_network_map(node_df, edges_e, zones, scenario)
+        m_gas = plot_gas_network_map(node_df, edges_g, zones, scenario)
+        m_h2  = plot_hydrogen_network_map(node_df, edges_h, zones, scenario)
+        m_el.save(os.path.join(html_dir, "Electricity Network Map.html"))
+        m_gas.save(os.path.join(html_dir, "Gas Network Map.html"))
+        m_h2.save(os.path.join(html_dir, "Hydrogen Network Map.html"))
+    else:
+        print("\n=== Skipping HTML visualisations (disabled) ===")
 
     # ── Step 11: Export ──────────────────────────────────────────────────────
     if output_mode == "openTEPES":

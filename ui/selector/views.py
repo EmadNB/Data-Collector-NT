@@ -60,6 +60,7 @@ _META_VALIDATORS: dict[str, Any] = {
     "hydrogen_terminal": lambda v: v in HYDROGEN_TERMINAL_OPTIONS,
     "output_mode":       lambda v: v in OUTPUT_MODES,
     "hours":             lambda v: str(v).isdigit() and 1 <= int(v) <= 8760,
+    "generate_html":     lambda v: v in ("yes", "no"),
 }
 
 _META_DEFAULTS: dict[str, str] = {
@@ -73,6 +74,7 @@ _META_DEFAULTS: dict[str, str] = {
     "hydrogen_terminal": "PCI/PMI",
     "output_mode":       "Normal",
     "hours":             "8736",
+    "generate_html":     "no",
 }
 
 
@@ -205,6 +207,7 @@ def generate(request: HttpRequest) -> HttpResponse:
                 selected_gas_terminal=_get("gas_terminal"),
                 selected_hydrogen_terminal=_get("hydrogen_terminal"),
                 selected_output=_get("output_mode"),
+                selected_generate_html=(_get("generate_html") == "yes"),
                 base_path=settings.COLLECTOR_BASE_PATH,
             )
         finally:
@@ -221,9 +224,11 @@ def generate(request: HttpRequest) -> HttpResponse:
     outputs_root = os.path.join(settings.COLLECTOR_BASE_PATH, "outputs")
     output_mode  = _get("output_mode")
     zip_sources  = [
-        (os.path.join(outputs_root, "HTMLs"),                            "HTMLs"),
         (os.path.join(outputs_root, "Excel Files", output_mode), os.path.join("Excel Files", output_mode)),
     ]
+    # Only include the HTMLs folder when HTML output generation is enabled.
+    if _get("generate_html") == "yes":
+        zip_sources.insert(0, (os.path.join(outputs_root, "HTMLs"), "HTMLs"))
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         for src_dir, arc_prefix in zip_sources:

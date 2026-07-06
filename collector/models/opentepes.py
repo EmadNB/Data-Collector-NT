@@ -915,31 +915,30 @@ def _write_variable_profiles(
     ]:
         _csv(folder, fname, blank_df)
 
-    # Energy inflows/outflows apply to hydro units only.
-    # suffix -> (Flow Energy profile key, hours per source period: daily=24, weekly=168)
+    # Energy inflows/outflows apply to hydro units only. suffix -> Flow Energy key.
     _HYDRO_FLOW = {
-        "HydroRoR":  ("River Flow Energy",     24),
-        "HydroPond": ("Pondage Flow Energy",   24),
-        "HydroRes":  ("Reservoir Flow Energy", 168),
-        "HydroPS_o": ("Open_PS Flow Energy",   168),
-        "HydroPS_c": ("Closed_PS Flow Energy", 168),
+        "HydroRoR":  "River Flow Energy",
+        "HydroPond": "Pondage Flow Energy",
+        "HydroRes":  "Reservoir Flow Energy",
+        "HydroPS_o": "Open_PS Flow Energy",
+        "HydroPS_c": "Closed_PS Flow Energy",
     }
     hydro_rowdefs = [r for r in gen_rows if r.get("suffix", "") in _HYDRO_FLOW]
     hydro_gens = [r["Generator"] for r in hydro_rowdefs]
 
-    # Fill EnergyInflows from Flow Energy: each period's value is repeated across
-    # the hours of that period (daily = 24 h, weekly = 168 h).
+    # Fill EnergyInflows from Flow Energy. profiles_df has already been expanded to
+    # hourly resolution (normalise_profiles_to_hourly), so index the series directly
+    # by hour — re-expanding by period here would collapse everything to week 0.
     inflow_cols: dict[str, list] = {}
     for r in hydro_rowdefs:
         gn = r["Generator"]
         flow = _HYDRO_FLOW.get(r.get("suffix", ""))
-        series = _get_profile(profiles_df, r["Node"], flow[0]) if flow else None
+        series = _get_profile(profiles_df, r["Node"], flow) if flow else None
         if flow is None or series is None or len(series) == 0:
             inflow_cols[gn] = ["" for _ in loadlevels]
             continue
-        period_hours = flow[1]
         vals = [
-            round(float(series[min(h // period_hours, len(series) - 1)]), 6)
+            round(float(series[min(h, len(series) - 1)]), 6)
             for h in range(len(loadlevels))
         ]
         # All-zero inflow column: leave blank rather than writing zeros.

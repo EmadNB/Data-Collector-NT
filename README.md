@@ -245,7 +245,6 @@ All input data is taken from the publicly published *Ten-Year Network Developmen
 - **[ENTSO-G](https://www.entsog.eu/)** — European Network of Transmission System
   Operators for **Gas**. Source of gas and hydrogen demand, pipelines, storage and
   terminal infrastructure.
-- **TYNDP 2024 commodity prices** — fuel and CO₂ prices (EUR/GJ → EUR/MWh, CO₂ in EUR/ton).
 
 ---
 

@@ -795,6 +795,18 @@ def _write_variable_profiles(
     # gen_name â†’ (zone, suffix, max_power)
     gen_index = {r["Generator"]: r for r in gen_rows if r.get("is_RES")}
 
+    # Solar fallback: when a solar type has capacity but its own profile is
+    # missing / all-zero, borrow its paired solar profile (already loaded for the
+    # same zone & period) so every solar generator with capacity gets a profile.
+    #   rooftop -> utility PV (LFSolarPV) ; utility PV -> LFSolarPVUtility ;
+    #   CSP no-storage <-> CSP with-storage
+    _SOLAR_FALLBACK = {
+        "SolarRoof":  "Solar Profile",
+        "Solar":      "Solar_Utility Profile",
+        "SolarCSP":   "CSP_withStorage_D Profile",
+        "SolarCSP_S": "CSP_noStorage Profile",
+    }
+
     # profile_key â†’ {gen_name: np.ndarray}
     col_data: dict[str, np.ndarray] = {}
     for profile_key, suffix in _PROFILE_TO_SUFFIX.items():
@@ -804,10 +816,16 @@ def _write_variable_profiles(
             if r.get("suffix") != suffix:
                 continue
             zone = r["Node"]
+            max_p = r.get("MaximumPower", 0.0)
             arr = _get_profile(profiles_df, zone, profile_key)
+            # Capacity present but primary profile missing/all-zero → use the pair.
+            if max_p > 0 and suffix in _SOLAR_FALLBACK \
+                    and (arr is None or not np.any(np.asarray(arr, dtype=float))):
+                fb = _get_profile(profiles_df, zone, _SOLAR_FALLBACK[suffix])
+                if fb is not None and np.any(np.asarray(fb, dtype=float)):
+                    arr = fb
             if arr is None:
                 continue
-            max_p = r.get("MaximumPower", 0.0)
             gen_name = r["Generator"]
             # Capacity factor Ã— installed capacity (profiles are 0-1 factors)
             cf = arr[:selected_hours]

@@ -1163,6 +1163,9 @@ def export_opentepes(
                 fuel_key = _OT_TECH_FUEL.get(ot_tech, "")
             commodity_fuel = round(commodity_prices.get(fuel_key, 0.0), 4) if fuel_key else 0.0
 
+            # DSR / Other Non-RES: their Price goes to FuelCost (not OMVariableCost).
+            is_dsr_onr = cap_col.startswith("DSR") or cap_col.startswith("Other Non-RES")
+
             row: dict = {
                 "Generator":    gen_name,
                 "Node":         zone,
@@ -1176,8 +1179,8 @@ def export_opentepes(
                 "EFOR":         round(efor, 4),
                 "RampUp":       round(ramp_up, 2) if ramp_up > 0 else "",
                 "RampDown":     round(ramp_dn, 2) if ramp_dn > 0 else "",
-                "FuelCost":     commodity_fuel,
-                "OMVariableCost": round(fuel_cost, 2),
+                "FuelCost":     round(fuel_cost, 2) if is_dsr_onr else commodity_fuel,
+                "OMVariableCost": 0 if is_dsr_onr else round(fuel_cost, 2),
                 "Efficiency":   out_eff,
                 "LinearTermEff": lin_eff,
                 "CO2EmissionRate": round(co2_rate, 6),

@@ -893,6 +893,17 @@ def _write_variable_profiles(
     df = pd.DataFrame(rows)
     _csv(folder, "oT_Data_VariableMaxGeneration.csv", df)
 
+    # Run-of-river hydro is non-dispatchable: set VariableMinGeneration equal to
+    # VariableMaxGeneration for those generators (only where Max has values); every
+    # other generator column stays blank.
+    hydro_ror_gens = {r["Generator"] for r in gen_rows if r.get("suffix") == "HydroRoR"}
+    min_gen_df = df.copy()
+    _meta = {"Period", "Scenario", "LoadLevel"}
+    for col in min_gen_df.columns:
+        if col not in _meta and col not in hydro_ror_gens:
+            min_gen_df[col] = ""
+    _csv(folder, "oT_Data_VariableMinGeneration.csv", min_gen_df)
+
     # Blank variable files: full generator label columns with empty values.
     blank_rows = []
     for ll in loadlevels:
@@ -903,7 +914,6 @@ def _write_variable_profiles(
     blank_df = pd.DataFrame(blank_rows)
 
     for fname in [
-        "oT_Data_VariableMinGeneration.csv",
         "oT_Data_VariableFuelCost.csv",
         "oT_Data_VariableEmissionCost.csv",
         "oT_Data_VariableMaxConsumption.csv",

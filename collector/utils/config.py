@@ -28,42 +28,57 @@ GAS_UNIT_FACTOR: float = 1000.0 / 24.0
 # Column definitions
 # ---------------------------------------------------------------------------
 
-TECH_COLUMNS = [
-    "Code",
-    "Nuclear (MW)",
-    "Hard Coal (old1) (MW)", "Hard Coal (old2) (MW)",
-    "Hard Coal (new) (MW)", "Hard Coal (ccs) (MW)",
-    "Lignite (old1) (MW)", "Lignite (old2) (MW)",
-    "Lignite (new) (MW)", "Lignite (ccs) (MW)",
-    "Gas (conv_old1) (MW)", "Gas (conv_old2) (MW)",
-    "Gas (ccgt_old1) (MW)", "Gas (ccgt_old2) (MW)",
-    "Gas (ccgt_new) (MW)", "Gas (ccgt_ccs) (MW)",
-    "Gas (ocgt_old) (MW)", "Gas (ocgt_new) (MW)",
-    "Light Oil (MW)", "Heavy oil (old1) (MW)", "Heavy oil (old2) (MW)",
-    "Oil shale (old) (MW)", "Oil shale (new) (MW)",
-    "Gas (ccgt_pre1) (MW)", "Gas (ccgt_pre2) (MW)",
-    "Hydrogen (fc) (MW)", "Hydrogen (ccgt) (MW)",
-    *[f"Other Non-RES{i+1} (MW)" for i in range(27)],
-    *[f"DSR{i+1} (MW)" for i in range(10)],
-    "Battery (MWh)", "Electrolyser (MW)",
-    "Wind (onshore) (MW)", "Wind (offshore) (MW)",
-    "Solar (thermal) (MW)", "Solar (MW)", "Solar (rooftop) (MW)",
-    "Solar (thermal_with_storage) (MW)",
-    "Hydro (river) (MW)",
-    "Hydro (pondage) (MWh)", "Hydro (pondage) (MW)",
-    "Hydro (reservoir) (MWh)", "Hydro (reservoir) (MW)",
-    "Hydro (open_ps) (MWh)", "Hydro (open_ps_turbine) (MW)", "Hydro (open_ps_pump) (MW)",
-    "Hydro (closed_ps) (MWh)", "Hydro (closed_ps_turbine) (MW)", "Hydro (closed_ps_pump) (MW)",
-    "Other RES (biomass) (MW)", "Other RES (geothermal) (MW)",
-    "Other RES (marine) (MW)", "Other RES (waste) (MW)", "Other RES (unknown) (MW)",
-    "Solar (thermal_with_storage) (MWh)", "Electrolyser (MWh)",
-    "Exports_non_ENTSOe (MW/h)",
-    *[f"DSR{i+1} (MW/h)" for i in range(10)],
-    "Other RES (biomass) (MW/h)", "Other RES (geothermal) (MW/h)",
-    "Other RES (marine) (MW/h)", "Other RES (waste) (MW/h)",
-    "Other RES (unknown) (MW/h)",
-    *[f"Other Non-RES{i+1} (MW/h)" for i in range(27)],
-]
+# DSR and Other Non-RES have a variable number of type columns on their PEMMDB
+# sheets (DSR: 11 for most zones, 19 for DE00; Other Non-RES: uniformly 27). The
+# DSR count is detected per run (max across the selected zones); Other Non-RES is
+# fixed. build_tech_columns() produces the capacity DataFrame column order for a
+# given DSR count so the loader, Normal export, and openTEPES stay consistent.
+OTHER_NONRES_COUNT = 27
+DSR_DEFAULT_COUNT = 10
+
+
+def build_tech_columns(n_dsr: int, n_nores: int = OTHER_NONRES_COUNT) -> list[str]:
+    """Return the ``tech_cap_df`` column order for *n_dsr* DSR type columns."""
+    return [
+        "Code",
+        "Nuclear (MW)",
+        "Hard Coal (old1) (MW)", "Hard Coal (old2) (MW)",
+        "Hard Coal (new) (MW)", "Hard Coal (ccs) (MW)",
+        "Lignite (old1) (MW)", "Lignite (old2) (MW)",
+        "Lignite (new) (MW)", "Lignite (ccs) (MW)",
+        "Gas (conv_old1) (MW)", "Gas (conv_old2) (MW)",
+        "Gas (ccgt_old1) (MW)", "Gas (ccgt_old2) (MW)",
+        "Gas (ccgt_new) (MW)", "Gas (ccgt_ccs) (MW)",
+        "Gas (ocgt_old) (MW)", "Gas (ocgt_new) (MW)",
+        "Light Oil (MW)", "Heavy oil (old1) (MW)", "Heavy oil (old2) (MW)",
+        "Oil shale (old) (MW)", "Oil shale (new) (MW)",
+        "Gas (ccgt_pre1) (MW)", "Gas (ccgt_pre2) (MW)",
+        "Hydrogen (fc) (MW)", "Hydrogen (ccgt) (MW)",
+        *[f"Other Non-RES{i+1} (MW)" for i in range(n_nores)],
+        *[f"DSR{i+1} (MW)" for i in range(n_dsr)],
+        "Battery (MWh)", "Electrolyser (MW)",
+        "Wind (onshore) (MW)", "Wind (offshore) (MW)",
+        "Solar (thermal) (MW)", "Solar (MW)", "Solar (rooftop) (MW)",
+        "Solar (thermal_with_storage) (MW)",
+        "Hydro (river) (MW)",
+        "Hydro (pondage) (MWh)", "Hydro (pondage) (MW)",
+        "Hydro (reservoir) (MWh)", "Hydro (reservoir) (MW)",
+        "Hydro (open_ps) (MWh)", "Hydro (open_ps_turbine) (MW)", "Hydro (open_ps_pump) (MW)",
+        "Hydro (closed_ps) (MWh)", "Hydro (closed_ps_turbine) (MW)", "Hydro (closed_ps_pump) (MW)",
+        "Other RES (biomass) (MW)", "Other RES (geothermal) (MW)",
+        "Other RES (marine) (MW)", "Other RES (waste) (MW)", "Other RES (unknown) (MW)",
+        "Solar (thermal_with_storage) (MWh)", "Electrolyser (MWh)",
+        "Exports_non_ENTSOe (MW/h)",
+        *[f"DSR{i+1} (MW/h)" for i in range(n_dsr)],
+        "Other RES (biomass) (MW/h)", "Other RES (geothermal) (MW/h)",
+        "Other RES (marine) (MW/h)", "Other RES (waste) (MW/h)",
+        "Other RES (unknown) (MW/h)",
+        *[f"Other Non-RES{i+1} (MW/h)" for i in range(n_nores)],
+    ]
+
+
+# Default (used only as a fallback / for imports); the loader rebuilds per run.
+TECH_COLUMNS = build_tech_columns(DSR_DEFAULT_COUNT)
 
 TECH_CHAR_COLUMNS = [
     "Code",

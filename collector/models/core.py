@@ -7,7 +7,7 @@ import os
 import numpy as np
 import pandas as pd
 
-from collector.utils.config import TECH_COLUMNS
+from collector.utils.config import TECH_COLUMNS, build_tech_columns
 from collector.utils.helpers import expand_profile_to_hourly
 
 # Mapping from technology capacity column name -> commodity price key
@@ -243,7 +243,9 @@ def export_zone_data(
         reserve_clean.loc[len(reserve_clean)] = [param, values[i] if i < len(values) else None]
 
     # Technology characteristics
-    tech_char_excel = _build_tech_char_excel(tech_char_df, zone_name)
+    _n_dsr = sum(1 for c in tech_cap_df.columns
+                 if str(c).startswith("DSR") and str(c).endswith("(MW)"))
+    tech_char_excel = _build_tech_char_excel(tech_char_df, zone_name, _n_dsr)
 
     # Drop DSR / Other Non-RES rows where the installed capacity is zero or absent
     if not tech_char_excel.empty:
@@ -329,7 +331,8 @@ def _extract_array_values(cell: object) -> list:
     return flat
 
 
-def _build_tech_char_excel(tech_char_df: pd.DataFrame, zone_name: str) -> pd.DataFrame:
+def _build_tech_char_excel(tech_char_df: pd.DataFrame, zone_name: str,
+                           n_dsr: int) -> pd.DataFrame:
     """Convert the technology characteristics row for *zone_name* to a 2-D DataFrame."""
     matches = tech_char_df[tech_char_df["Code"] == zone_name]
     if matches.empty:
@@ -337,7 +340,9 @@ def _build_tech_char_excel(tech_char_df: pd.DataFrame, zone_name: str) -> pd.Dat
 
     idx = matches.index[0]
     out = pd.DataFrame()
-    tech_label_cols = TECH_COLUMNS[1:]
+    # Char rows are labelled positionally, so match the DSR count used to build
+    # the char arrays (Other Non-RES is fixed at 27).
+    tech_label_cols = build_tech_columns(n_dsr)[1:]
 
     for col in tech_char_df.columns[1:]:
         arr = tech_char_df.loc[idx, col]

@@ -28,6 +28,7 @@ def _excel(path: str) -> pd.ExcelFile:
 def clear_excel_cache() -> None:
     """Drop cached workbook handles so a fresh run picks up any input changes."""
     _excel.cache_clear()
+    _dsr_col_count.cache_clear()
 
 from collector.utils.config import (
     FILEPATH_CO2_FACTORS,
@@ -46,8 +47,40 @@ from collector.utils.config import (
     SOLAR_ROOFTOP_TARGET_LEN,
     TECH_CHAR_COLUMNS,
     TECH_COLUMNS,
+    DSR_DEFAULT_COUNT,
+    build_tech_columns,
 )
 from collector.utils.helpers import get_co2_usecols, get_pemmdb_filepath
+
+
+@lru_cache(maxsize=256)
+def _dsr_col_count(filepath: str) -> int:
+    """Number of DSR type columns (C..) on a zone's DSR sheet, 0 if unavailable.
+
+    Uses a fresh read-only workbook: reading ``max_column`` from the shared
+    cached ``_excel`` handle is unreliable once its worksheet has been streamed.
+    The integer result is cached so detection happens once per file.
+    """
+    try:
+        wb = openpyxl.load_workbook(filepath, read_only=True)
+        try:
+            n = wb["DSR"].max_column
+        finally:
+            wb.close()
+        return max((n or 2) - 2, 0)
+    except Exception:
+        return 0
+
+
+def _dsr_count_for(selected_zones: list[str], scenario: int) -> int:
+    """Max DSR type-column count across *selected_zones* (>= the default 10)."""
+    counts = [_dsr_col_count(get_pemmdb_filepath(z, scenario)) for z in selected_zones]
+    return max(counts + [DSR_DEFAULT_COUNT])
+
+
+def _dsr_cols(n_dsr: int) -> list[str]:
+    """Excel column letters C.. for *n_dsr* DSR type columns."""
+    return [get_column_letter(3 + i) for i in range(n_dsr)]
 
 
 # ---------------------------------------------------------------------------
@@ -194,6 +227,8 @@ def load_tech_capacities(
         >>> "Nuclear (MW)" in cap_df.columns
         True
     """
+    n_dsr = _dsr_count_for(selected_zones, scenario)
+    columns = build_tech_columns(n_dsr)
     tech_rows: list[dict] = []
     for code in node_df["Code"]:
         if code not in selected_zones:
@@ -203,16 +238,16 @@ def load_tech_capacities(
         try:
             _read_thermal_capacities(filepath, data)
             _read_hydro_capacities(filepath, data)
-            _read_res_capacities(filepath, data)
+            _read_res_capacities(filepath, data, n_dsr)
             _read_storage_capacities(filepath, data)
-            _read_timeseries_capacities(filepath, data, selected_hours)
+            _read_timeseries_capacities(filepath, data, selected_hours, n_dsr)
             tech_rows.append(data)
             print(f"Technology capacities for {code}: OK")
         except FileNotFoundError:
             print(f"Technology capacities for {code}: file not found – zeros used")
-            data.update({col: 0 for col in TECH_COLUMNS[1:]})
+            data.update({col: 0 for col in columns[1:]})
             tech_rows.append(data)
-    return pd.DataFrame(tech_rows, columns=TECH_COLUMNS)
+    return pd.DataFrame(tech_rows, columns=columns)
 
 
 def _read_scalar(filepath: str, sheet: str, col: str, row: int,
@@ -287,7 +322,7 @@ def _read_hydro_capacities(filepath: str, data: dict) -> None:
     data["Hydro (closed_ps_pump) (MW)"]   = _cell("B", 22)
 
 
-def _read_res_capacities(filepath: str, data: dict) -> None:
+def _read_res_capacities(filepath: str, data: dict, n_dsr: int = DSR_DEFAULT_COUNT) -> None:
     """Populate *data* with RES and additional technology capacity values."""
     def _cell(sheet: str, col: str, row: int, scale: float = 1.0) -> float:
         return _read_scalar(filepath, sheet, col, row) * scale
@@ -306,7 +341,7 @@ def _read_res_capacities(filepath: str, data: dict) -> None:
     data["Other RES (marine) (MW)"]              = _cell("Other RES", "G", 8)
     data["Other RES (waste) (MW)"]               = _cell("Other RES", "H", 8)
     data["Other RES (unknown) (MW)"]             = _cell("Other RES", "I", 8)
-    for _i, _col in enumerate("CDEFGHIJKL"):
+    for _i, _col in enumerate(_dsr_cols(n_dsr)):
         data[f"DSR{_i+1} (MW)"] = _cell("DSR", _col, 8)
 
 
@@ -320,18 +355,24 @@ def _read_storage_capacities(filepath: str, data: dict) -> None:
     data["Electrolyser (MWh)"] = _cell("Electrolyser", "F", 11)
 
 
-def _read_timeseries_capacities(filepath: str, data: dict, selected_hours: int) -> None:
+def _read_timeseries_capacities(filepath: str, data: dict, selected_hours: int,
+                                n_dsr: int = DSR_DEFAULT_COUNT) -> None:
     """Populate *data* with hourly time-series export / profile columns."""
     def _ts(sheet: str, col: str, row: int) -> np.ndarray:
-        return pd.read_excel(
-            _excel(filepath), sheet_name=sheet, usecols=col, header=None,
-            skiprows=row, nrows=selected_hours,
-        ).to_numpy()
+        # Returns zeros when the column is out of the sheet's range (e.g. a DSR
+        # type column that this zone's narrower sheet does not have).
+        try:
+            return pd.read_excel(
+                _excel(filepath), sheet_name=sheet, usecols=col, header=None,
+                skiprows=row, nrows=selected_hours,
+            ).to_numpy()
+        except Exception:
+            return np.zeros((selected_hours, 1))
 
     for _i, _col in enumerate(_OTHER_NONRES_COLS):
         data[f"Other Non-RES{_i+1} (MW/h)"] = _ts("Other Non-RES", _col, 18)
     data["Exports_non_ENTSOe (MW/h)"]     = -_ts("Exchanges",   "C", 28)
-    for _i, _col in enumerate("CDEFGHIJKL"):
+    for _i, _col in enumerate(_dsr_cols(n_dsr)):
         data[f"DSR{_i+1} (MW/h)"] = _ts("DSR", _col, 15)
     data["Other RES (biomass) (MW/h)"]    = _ts("Other RES",    "E", 10)
     data["Other RES (geothermal) (MW/h)"] = _ts("Other RES",    "F", 10)
@@ -367,6 +408,7 @@ def load_tech_characteristics(
         True
     """
     co2_col = get_co2_usecols(scenario)
+    n_dsr = _dsr_count_for(selected_zones, scenario)
     tech_char_rows: list[dict] = []
 
     for code in node_df["Code"]:
@@ -374,7 +416,7 @@ def load_tech_characteristics(
             continue
         filepath = get_pemmdb_filepath(code, scenario)
         try:
-            data_char = _read_single_zone_characteristics(filepath, co2_col, code)
+            data_char = _read_single_zone_characteristics(filepath, co2_col, code, n_dsr)
             tech_char_rows.append(data_char)
             print(f"Technology characteristics for {code}: OK")
         except FileNotFoundError:
@@ -384,7 +426,7 @@ def load_tech_characteristics(
 
 
 def _read_single_zone_characteristics(
-    filepath: str, co2_col: str, code: str
+    filepath: str, co2_col: str, code: str, n_dsr: int = DSR_DEFAULT_COUNT
 ) -> dict:
     """Read all technology characteristic fields for one zone."""
     def _arr(col: str, row: int, nrows: int = 52) -> np.ndarray:
@@ -444,8 +486,8 @@ def _read_single_zone_characteristics(
         dc["Net maximum capacity - generation perspective (MW)"] = np.append(dc["Net maximum capacity - generation perspective (MW)"], 0)
         dc["Net maximum capacity - demand perspective (MW)"]     = np.append(dc["Net maximum capacity - demand perspective (MW)"], 0)
 
-    # DSR1-DSR10 (each successive column in the DSR sheet)
-    for _col in "CDEFGHIJKL":
+    # DSR1..n_dsr (each successive column in the DSR sheet)
+    for _col in _dsr_cols(n_dsr):
         for key in ("Fixed Generation Reduction (%)", "Ramp-Up Rate (MW/h)", "Ramp-Down Rate (MW/h)"):
             dc[key] = np.append(dc[key], 0)
         dc["Number of Units"] = np.append(dc["Number of Units"], _cell(filepath, "DSR", _col, 9))

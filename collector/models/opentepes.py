@@ -54,15 +54,25 @@ def _tech_label(cap_col: str) -> str:
 # For techs where max_power (and max_charge) come from tech_char_df rather than
 # tech_cap_df (e.g. Battery where the cap_col stores MWh, not MW):
 # cap_col -> (char_col_for_max_p, char_col_for_max_charge, char_idx)
-_CHAR_POWER_ENTRIES: dict[str, tuple[str, str, int]] = {
+_CHAR_POWER_COLS: dict[str, tuple[str, str]] = {
     "Battery (MWh)": (
         "Net maximum capacity - generation perspective (MW)",
         "Net maximum capacity - demand perspective (MW)",
-        63,
     ),
 }
 
-_TECH_ENTRIES: list[tuple[str, str, str, bool, int | None]] = [
+# Number of Other Non-RES type columns (uniform across all zones' PEMMDB sheets).
+_NORES_COUNT = 27
+
+
+def _battery_char_idx(n_dsr: int) -> int:
+    """Battery's index in the tech-characteristic arrays: after thermal(26) +
+    Other Non-RES(27) + DSR(n_dsr)."""
+    return 26 + _NORES_COUNT + n_dsr
+
+
+# Thermal entries occupy fixed char-array positions 0..25.
+_THERMAL_ENTRIES: list[tuple[str, str, str, bool, int | None]] = [
     # â"€â"€ Thermal / conventional â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
     ("Nuclear (MW)",           "Nuclear",      "Nuclear",      False,  0),
     ("Hard Coal (old1) (MW)",  "Coal_old1",    "Coal",         False,  1),
@@ -90,10 +100,10 @@ _TECH_ENTRIES: list[tuple[str, str, str, bool, int | None]] = [
     ("Gas (ccgt_pre2) (MW)",   "Gas_pre2",     "Gas",          False, 23),
     ("Hydrogen (fc) (MW)",     "H2_fc",        "Hydrogen",     False, 24),
     ("Hydrogen (ccgt) (MW)",   "H2_ccgt",      "Hydrogen",     False, 25),
-    *[(f"Other Non-RES{i+1} (MW)", f"OtherNonRES{i+1}", "Other", False, 26 + i) for i in range(27)],
-    *[(f"DSR{i+1} (MW)", f"DSR{i+1}", "DSR", False, 53 + i) for i in range(10)],
-    ("Battery (MWh)",          "Battery",      "Battery",      False, 63),
-    ("Electrolyser (MW)",      "Electr",       "Electrolyser", False, None),
+]
+
+# RES / hydro / other-RES entries (char_idx is None — no thermal-style chars).
+_RES_ENTRIES: list[tuple[str, str, str, bool, int | None]] = [
     # â"€â"€ RES â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
     ("Wind (onshore) (MW)",    "WindOn",       "Wind",         True,  None),
     ("Wind (offshore) (MW)",   "WindOff",      "Wind",         True,  None),
@@ -114,6 +124,24 @@ _TECH_ENTRIES: list[tuple[str, str, str, bool, int | None]] = [
     ("Other RES (waste) (MW)",      "Waste",    "Biomass",    False, None),
     ("Other RES (unknown) (MW)",    "RES_unk",  "RES",        True,  None),
 ]
+
+
+def _build_tech_entries(n_dsr: int) -> list[tuple[str, str, str, bool, int | None]]:
+    """Assemble the technology table for *n_dsr* DSR types.
+
+    char_idx layout: thermal 0-25, Other Non-RES 26-52, DSR 53.., then Battery
+    and Electrolyser after the DSR block, and the char-less RES/hydro entries.
+    """
+    return [
+        *_THERMAL_ENTRIES,
+        *[(f"Other Non-RES{i+1} (MW)", f"OtherNonRES{i+1}", "Other", False, 26 + i)
+          for i in range(_NORES_COUNT)],
+        *[(f"DSR{i+1} (MW)", f"DSR{i+1}", "DSR", False, 26 + _NORES_COUNT + i)
+          for i in range(n_dsr)],
+        ("Battery (MWh)",     "Battery", "Battery",      False, _battery_char_idx(n_dsr)),
+        ("Electrolyser (MW)", "Electr",  "Electrolyser", False, None),
+        *_RES_ENTRIES,
+    ]
 
 # Storage MW columns (turbine side already in _TECH_ENTRIES; here are MWh caps)
 _STORAGE_MW_PAIRS: dict[str, str] = {
@@ -1085,17 +1113,24 @@ def export_opentepes(
     gen_rows: list[dict] = []
     all_technologies: list[str] = []
 
+    # DSR type count is data-driven (max across zones, from tech_cap_df); Other
+    # Non-RES is fixed at 27. Build the technology table for this DSR count.
+    n_dsr = sum(1 for c in tech_cap_df.columns
+                if str(c).startswith("DSR") and str(c).endswith("(MW)"))
+    tech_entries = _build_tech_entries(n_dsr)
+    battery_idx = _battery_char_idx(n_dsr)
+
     for zone in selected_zones:
         # DSR / Other Non-RES columns with capacity present in this zone
         _single_dsr = len([
-            c for c, *_ in _TECH_ENTRIES
+            c for c, *_ in tech_entries
             if c.startswith("DSR") and _col_val(tech_cap_df, zone, c) != 0
         ]) == 1
         _single_onr = len([
-            c for c, *_ in _TECH_ENTRIES
+            c for c, *_ in tech_entries
             if c.startswith("Other Non-RES") and _col_val(tech_cap_df, zone, c) != 0
         ]) == 1
-        for cap_col, suffix, ot_tech, is_res, char_idx in _TECH_ENTRIES:
+        for cap_col, suffix, ot_tech, is_res, char_idx in tech_entries:
             # Skip DSR / Other Non-RES types that have no capacity in this zone
             if (cap_col.startswith("DSR") or cap_col.startswith("Other Non-RES")) \
                     and _col_val(tech_cap_df, zone, cap_col) == 0:
@@ -1116,10 +1151,10 @@ def export_opentepes(
             all_technologies.append(tech_lbl)
 
             # Capacity: Battery stores MWh in tech_cap_df; get MW from tech_char_df
-            if cap_col in _CHAR_POWER_ENTRIES:
-                p_col, c_col, cidx = _CHAR_POWER_ENTRIES[cap_col]
-                max_p      = _get_char(tech_char_df, zone, p_col, cidx, 0.0)
-                max_charge = _get_char(tech_char_df, zone, c_col, cidx, 0.0)
+            if cap_col in _CHAR_POWER_COLS:
+                p_col, c_col = _CHAR_POWER_COLS[cap_col]
+                max_p      = _get_char(tech_char_df, zone, p_col, battery_idx, 0.0)
+                max_charge = _get_char(tech_char_df, zone, c_col, battery_idx, 0.0)
                 max_storage = _col_val(tech_cap_df, zone, cap_col)
             elif cap_col == "Electrolyser (MW)":
                 # Electrolyser is a consumer: its capacity goes to MaximumCharge
@@ -1142,7 +1177,7 @@ def export_opentepes(
             co2_rate    = _get_char(tech_char_df, zone, "CO2 Factor (ton/MWh)", char_idx, 0.0)
 
             # Predefined efficiency written to output: 0.9 battery, 0.7 pump, else 1
-            out_eff = (0.9 if cap_col in _CHAR_POWER_ENTRIES
+            out_eff = (0.9 if cap_col in _CHAR_POWER_COLS
                        else 0.7 if cap_col in _PUMP_PAIRS
                        else 1.0)
 

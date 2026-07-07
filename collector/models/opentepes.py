@@ -322,12 +322,10 @@ def _write_dicts(
     if unique_areas is None:
         unique_areas = ["Area1"]
 
-    # Each electricity node gets an auxiliary H2 node and Exports node, both
-    # belonging to the same zone as their parent electricity node.
-    h2_nodes  = [f"{z}_H2" for z in zones]
+    # Each electricity node gets an auxiliary Exports node in the same zone.
     exp_nodes = [f"{z}_Exp" for z in zones]
-    all_nodes = list(zones) + h2_nodes + exp_nodes
-    node_zone = list(zones) + list(zones) + list(zones)  # aux nodes -> parent zone
+    all_nodes = list(zones) + exp_nodes
+    node_zone = list(zones) + list(zones)  # aux Exp nodes -> parent zone
 
     _csv(folder, "oT_Dict_Node.csv",
          pd.DataFrame({"Node": all_nodes}))
@@ -398,12 +396,11 @@ def _write_data_static(
     if unique_areas is None:
         unique_areas = ["Area1"]
 
-    # Node locations (aux H2 / Exports nodes share their parent's coordinates)
+    # Node locations (the aux Exports node shares its parent's coordinates)
     loc_rows = []
     for z in zones:
         lat, lon = _node_latlon(node_df, z)
         loc_rows.append({"Node": z,          "Latitude": lat, "Longitude": lon})
-        loc_rows.append({"Node": f"{z}_H2",  "Latitude": lat, "Longitude": lon})
         loc_rows.append({"Node": f"{z}_Exp", "Latitude": lat, "Longitude": lon})
     _csv(folder, "oT_Data_NodeLocation.csv", pd.DataFrame(loc_rows))
 
@@ -633,13 +630,13 @@ def _write_network(
         })
         rows.append(line_row)
 
-    # Connect each electricity node to its auxiliary H2 and Exports nodes with a
-    # high-capacity line (reactance 0.1) so power can flow to serve their demand.
+    # Connect each electricity node to its auxiliary Exports node with a
+    # high-capacity line (reactance 0.1) so power can flow to serve its demand.
     cid = "AC1"
     if cid not in circuit_ids:
         circuit_ids.append(cid)
     for z in zones:
-        for aux in (f"{z}_H2", f"{z}_Exp"):
+        for aux in (f"{z}_Exp",):
             aux_row = {c: "" for c in net_cols}
             aux_row.update({
                 "InitialNode":    z,
@@ -738,8 +735,6 @@ def _write_demand(
     tech_char_df: pd.DataFrame | None = None,
     export_df: pd.DataFrame | None = None,
 ) -> None:
-    # char index of the Electrolyser row in the tech-characteristic arrays
-    _ELECTROLYSER_IDX = 64
     demand_data: dict[str, list] = {}
     for zone in zones:
         # Electricity demand on the electricity node (unchanged)
@@ -747,17 +742,6 @@ def _write_demand(
         elec = np.array(arr[:selected_hours], dtype=float) if arr is not None \
             else np.zeros(selected_hours)
         demand_data[zone] = list(elec)
-
-        # Hydrogen demand (electricity-equivalent) on the {zone}_H2 node
-        h2_demand = np.zeros(selected_hours)
-        h2 = _get_profile(profiles_df, zone, "Hydrogen Demand Profile")
-        if h2 is not None and tech_char_df is not None:
-            eff = _get_char(tech_char_df, zone, "Efficiency (%)", _ELECTROLYSER_IDX, 0.0)
-            if eff > 0:
-                h2 = np.asarray(h2[:selected_hours], dtype=float)
-                n = min(len(h2_demand), len(h2))
-                h2_demand[:n] = h2[:n] / eff
-        demand_data[f"{zone}_H2"] = list(h2_demand)
 
         # Net exports to zones outside the selection on the {zone}_Exp node
         exp_demand = np.zeros(selected_hours)
@@ -770,7 +754,7 @@ def _write_demand(
                 exp_demand[:n] = net[:n]
         demand_data[f"{zone}_Exp"] = list(exp_demand)
 
-    all_nodes = list(zones) + [f"{z}_H2" for z in zones] + [f"{z}_Exp" for z in zones]
+    all_nodes = list(zones) + [f"{z}_Exp" for z in zones]
 
     # Nodes whose demand is zero at every load level: keep them at 0 rather than
     # applying the 1 W floor (don't invent demand for a node that never has any).
@@ -925,7 +909,10 @@ def _write_variable_profiles(
     ]:
         _csv(folder, fname, blank_df)
 
-    # Energy inflows/outflows apply to hydro units only. suffix -> Flow Energy key.
+    # Energy inflows (hydro Flow Energy) and outflows (electrolyser H2 demand).
+    # Both files carry every generator column; generators without values are blank
+    # (all-zero columns are omitted, same empty-logic as the other Variable* files).
+    # profiles_df is already expanded to hourly resolution, so index series by hour.
     _HYDRO_FLOW = {
         "HydroRoR":  "River Flow Energy",
         "HydroPond": "Pondage Flow Energy",
@@ -933,43 +920,38 @@ def _write_variable_profiles(
         "HydroPS_o": "Open_PS Flow Energy",
         "HydroPS_c": "Closed_PS Flow Energy",
     }
-    hydro_rowdefs = [r for r in gen_rows if r.get("suffix", "") in _HYDRO_FLOW]
-    hydro_gens = [r["Generator"] for r in hydro_rowdefs]
 
-    # Fill EnergyInflows from Flow Energy. profiles_df has already been expanded to
-    # hourly resolution (normalise_profiles_to_hourly), so index the series directly
-    # by hour — re-expanding by period here would collapse everything to week 0.
+    def _hourly_col(node: str, profile_key: str) -> list | None:
+        series = _get_profile(profiles_df, node, profile_key)
+        if series is None or len(series) == 0:
+            return None
+        vals = [round(float(series[min(h, len(series) - 1)]), 6) for h in range(len(loadlevels))]
+        return vals if any(v != 0 for v in vals) else None   # all-zero -> blank
+
     inflow_cols: dict[str, list] = {}
-    for r in hydro_rowdefs:
-        gn = r["Generator"]
-        flow = _HYDRO_FLOW.get(r.get("suffix", ""))
-        series = _get_profile(profiles_df, r["Node"], flow) if flow else None
-        if flow is None or series is None or len(series) == 0:
-            inflow_cols[gn] = ["" for _ in loadlevels]
-            continue
-        vals = [
-            round(float(series[min(h, len(series) - 1)]), 6)
-            for h in range(len(loadlevels))
-        ]
-        # All-zero inflow column: leave blank rather than writing zeros.
-        inflow_cols[gn] = ["" for _ in vals] if not any(v != 0 for v in vals) else vals
+    outflow_cols: dict[str, list] = {}
+    for r in gen_rows:
+        suffix = r.get("suffix", "")
+        if suffix in _HYDRO_FLOW:                      # hydro inflows
+            col = _hourly_col(r["Node"], _HYDRO_FLOW[suffix])
+            if col is not None:
+                inflow_cols[r["Generator"]] = col
+        elif suffix == "Electr":                       # electrolyser H2 demand (undivided)
+            col = _hourly_col(r["Node"], "Hydrogen Demand Profile")
+            if col is not None:
+                outflow_cols[r["Generator"]] = col
 
-    inflow_rows = []
-    for i, ll in enumerate(loadlevels):
-        row = {"Period": scenario, "Scenario": sc_name, "LoadLevel": ll}
-        for gn in hydro_gens:
-            row[gn] = inflow_cols[gn][i]
-        inflow_rows.append(row)
-    _csv(folder, "oT_Data_EnergyInflows.csv", pd.DataFrame(inflow_rows))
+    def _flow_df(col_map: dict[str, list]) -> pd.DataFrame:
+        out = []
+        for i, ll in enumerate(loadlevels):
+            row = {"Period": scenario, "Scenario": sc_name, "LoadLevel": ll}
+            for gn in all_gen_names:
+                row[gn] = col_map[gn][i] if gn in col_map else ""
+            out.append(row)
+        return pd.DataFrame(out)
 
-    # Outflows: hydro columns, left empty
-    outflow_rows = []
-    for ll in loadlevels:
-        row = {"Period": scenario, "Scenario": sc_name, "LoadLevel": ll}
-        for gn in hydro_gens:
-            row[gn] = ""
-        outflow_rows.append(row)
-    _csv(folder, "oT_Data_EnergyOutflows.csv", pd.DataFrame(outflow_rows))
+    _csv(folder, "oT_Data_EnergyInflows.csv", _flow_df(inflow_cols))
+    _csv(folder, "oT_Data_EnergyOutflows.csv", _flow_df(outflow_cols))
 
 
 def _write_reserve_files(
@@ -1212,10 +1194,11 @@ def export_opentepes(
     _write_generation(output_folder, gen_rows, scenario)
     _write_demand(output_folder, profiles_df, selected_zones, selected_hours, scenario, loadlevels, sc_name,
                   tech_char_df=tech_char_df, export_df=export_df)
-    # Hydrogen demand is folded into electricity demand via the electrolyser, so the
-    # hydrogen carrier is not modelled separately. Emitting oT_Data_NetworkHydrogen.csv
-    # would switch on openTEPES' pIndHydrogen and then fail on the (now absent)
-    # oT_Data_DemandHydrogen table, so the H2 network file is intentionally not written.
+    # Hydrogen demand is modelled as a required EnergyOutflow on each zone's
+    # electrolyser (in _write_variable_profiles), so the hydrogen carrier is not
+    # modelled separately. Emitting oT_Data_NetworkHydrogen.csv would switch on
+    # openTEPES' pIndHydrogen and then fail on the (now absent) oT_Data_DemandHydrogen
+    # table, so the H2 network file is intentionally not written.
     _write_variable_profiles(output_folder, profiles_df, tech_cap_df, gen_rows, selected_hours, scenario, loadlevels, sc_name)
     _write_reserve_files(output_folder, scenario, loadlevels, sc_name, unique_areas, area_fcr)
 

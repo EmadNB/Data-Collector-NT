@@ -1176,10 +1176,16 @@ def export_opentepes(
             efficiency  = _get_char(tech_char_df, zone, "Efficiency (%)", char_idx, 0.0)
             co2_rate    = _get_char(tech_char_df, zone, "CO2 Factor (ton/MWh)", char_idx, 0.0)
 
-            # Predefined efficiency written to output: 0.9 battery, 0.7 pump, else 1
+            # Predefined efficiency written to output: 0.9 battery, 0.7 pump, else 1.
+            # The electrolyser uses its real efficiency from the PEMMDB sheet.
             out_eff = (0.9 if cap_col in _CHAR_POWER_COLS
                        else 0.7 if cap_col in _PUMP_PAIRS
                        else 1.0)
+            if cap_col == "Electrolyser (MW)":
+                # Electrolyser row sits right after Battery in the char arrays.
+                _eff = _get_char(tech_char_df, zone, "Efficiency (%)", battery_idx + 1, 0.0)
+                if _eff > 0:
+                    out_eff = round(_eff, 4)
 
             # LinearTerm (heat rate) is only defined for thermal units and DSR;
             # everything else uses an efficiency of 1 (→ LinearTerm = 1).

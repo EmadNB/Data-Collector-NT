@@ -546,8 +546,8 @@ def _write_generation(
             "StorageInvestment": 0, "Inertia": 0,
             "MaximumReactivePower": 0, "MinimumReactivePower": 0,
             "InvestmentLo": 0, "InvestmentUp": 0, "RetirementLo": 0, "RetirementUp": 0,
-            # production functions (not used in our setup)
-            "ProductionFunctionHydro": 0, "ProductionFunctionH2": 0,
+            # production functions (H2 set for electrolysers when H2 carrier is on)
+            "ProductionFunctionHydro": 0, "ProductionFunctionH2": r.get("ProductionFunctionH2", 0),
             "ProductionFunctionHeat": 0,  "ProductionFunctionH2ToHeat": 0,
         }
         rows.append(row)
@@ -737,7 +737,7 @@ def _write_network_h2(
         line_row.update({
             "InitialNode":    frm,
             "FinalNode":      to,
-            "Circuit":        "h2pipe1",
+            "Circuit":        "AC1",  # reuse the electricity circuit id (in oT_Dict_Circuit)
             "InitialPeriod":  scenario,
             "FinalPeriod":    scenario,
             "Length":         round(length, 1),
@@ -806,6 +806,39 @@ def _write_demand(
                 row[node] = 1e-6     # 1 W floor when demand is 0 this hour
         rows.append(row)
     _csv(folder, "oT_Data_Demand.csv", pd.DataFrame(rows))
+
+
+def _write_demand_hydrogen(
+    folder: str,
+    profiles_df: dict[str, list[dict]],
+    zones: list[str],
+    selected_hours: int,
+    scenario: int,
+    loadlevels: list[str],
+    sc_name: str = "sc01",
+) -> None:
+    """Write oT_Data_DemandHydrogen.csv (H2 demand per node, kept in MW).
+
+    Needs a column for every node (electricity zones + their aux Exp nodes);
+    H2 demand sits on the electricity nodes, the aux nodes get 0. Providing this
+    file switches on openTEPES' hydrogen carrier (pIndHydrogen).
+    """
+    all_nodes = list(zones) + [f"{z}_Exp" for z in zones]
+    h2_data: dict[str, np.ndarray] = {}
+    for zone in zones:
+        arr = _get_profile(profiles_df, zone, "Hydrogen Demand Profile")
+        h2_data[zone] = np.asarray(arr[:selected_hours], dtype=float) if arr is not None \
+            else np.zeros(selected_hours)
+
+    rows = []
+    for i, ll in enumerate(loadlevels):
+        row: dict = {"Period": scenario, "Scenario": sc_name, "LoadLevel": ll}
+        for node in all_nodes:
+            col = h2_data.get(node)
+            v = float(col[i]) if (col is not None and i < len(col)) else 0.0
+            row[node] = round(v, 4)
+        rows.append(row)
+    _csv(folder, "oT_Data_DemandHydrogen.csv", pd.DataFrame(rows))
 
 
 def _write_variable_profiles(
@@ -955,10 +988,10 @@ def _write_variable_profiles(
     ]:
         _csv(folder, fname, blank_df)
 
-    # Energy inflows (hydro Flow Energy) and outflows (electrolyser H2 demand).
-    # Both files carry every generator column; generators without values are blank
-    # (all-zero columns are omitted, same empty-logic as the other Variable* files).
-    # profiles_df is already expanded to hourly resolution, so index series by hour.
+    # Energy inflows apply to hydro units (from their Flow Energy series); outflows
+    # are unused now that hydrogen demand is modelled via the H2 carrier. Both files
+    # carry every generator column; generators without values are blank (all-zero
+    # columns omitted). profiles_df is already hourly, so index the series by hour.
     _HYDRO_FLOW = {
         "HydroRoR":  "River Flow Energy",
         "HydroPond": "Pondage Flow Energy",
@@ -982,10 +1015,6 @@ def _write_variable_profiles(
             col = _hourly_col(r["Node"], _HYDRO_FLOW[suffix])
             if col is not None:
                 inflow_cols[r["Generator"]] = col
-        elif suffix == "Electr":                       # electrolyser H2 demand (undivided)
-            col = _hourly_col(r["Node"], "Hydrogen Demand Profile")
-            if col is not None:
-                outflow_cols[r["Generator"]] = col
 
     def _flow_df(col_map: dict[str, list]) -> pd.DataFrame:
         out = []
@@ -1120,6 +1149,15 @@ def export_opentepes(
     tech_entries = _build_tech_entries(n_dsr)
     battery_idx = _battery_char_idx(n_dsr)
 
+    # Hydrogen carrier is enabled when the selection has any H2 demand (2030/2040;
+    # 2050 has none). When on, electrolysers get a ProductionFunctionH2 and the
+    # oT_Data_DemandHydrogen / oT_Data_NetworkHydrogen files are written.
+    h2_enabled = any(
+        (_get_profile(profiles_df, z, "Hydrogen Demand Profile") is not None
+         and np.any(np.asarray(_get_profile(profiles_df, z, "Hydrogen Demand Profile"), dtype=float)))
+        for z in selected_zones
+    )
+
     for zone in selected_zones:
         # DSR / Other Non-RES columns with capacity present in this zone
         _single_dsr = len([
@@ -1177,15 +1215,18 @@ def export_opentepes(
             co2_rate    = _get_char(tech_char_df, zone, "CO2 Factor (ton/MWh)", char_idx, 0.0)
 
             # Predefined efficiency written to output: 0.9 battery, 0.7 pump, else 1.
-            # The electrolyser uses its real efficiency from the PEMMDB sheet.
             out_eff = (0.9 if cap_col in _CHAR_POWER_COLS
                        else 0.7 if cap_col in _PUMP_PAIRS
                        else 1.0)
-            if cap_col == "Electrolyser (MW)":
-                # Electrolyser row sits right after Battery in the char arrays.
+
+            # Electrolyser: real efficiency goes into ProductionFunctionH2
+            # (electricity per unit H2 = 1/efficiency; H2 demand is kept in MW).
+            # Only when the hydrogen carrier is enabled; Efficiency column stays 1.
+            prod_func_h2 = 0.0
+            if cap_col == "Electrolyser (MW)" and h2_enabled:
                 _eff = _get_char(tech_char_df, zone, "Efficiency (%)", battery_idx + 1, 0.0)
                 if _eff > 0:
-                    out_eff = round(_eff, 4)
+                    prod_func_h2 = round(1.0 / _eff, 6)
 
             # LinearTerm (heat rate) is only defined for thermal units and DSR;
             # everything else uses an efficiency of 1 (→ LinearTerm = 1).
@@ -1237,6 +1278,7 @@ def export_opentepes(
                 "CO2EmissionRate": round(co2_rate, 6),
                 "Availability": 1,
                 "MustRun":      must_run_flag,
+                "ProductionFunctionH2": prod_func_h2,
                 "is_RES":       is_res,
                 "suffix":       suffix,
                 "cap_col":      cap_col,
@@ -1253,11 +1295,14 @@ def export_opentepes(
     _write_generation(output_folder, gen_rows, scenario)
     _write_demand(output_folder, profiles_df, selected_zones, selected_hours, scenario, loadlevels, sc_name,
                   tech_char_df=tech_char_df, export_df=export_df)
-    # Hydrogen demand is modelled as a required EnergyOutflow on each zone's
-    # electrolyser (in _write_variable_profiles), so the hydrogen carrier is not
-    # modelled separately. Emitting oT_Data_NetworkHydrogen.csv would switch on
-    # openTEPES' pIndHydrogen and then fail on the (now absent) oT_Data_DemandHydrogen
-    # table, so the H2 network file is intentionally not written.
+    # Hydrogen carrier: when the selection has H2 demand (2030/2040), write the H2
+    # demand per node (in MW) and the cross-border H2 pipeline network. Together
+    # these switch on openTEPES' pIndHydrogen, so countries can trade H2 and an
+    # electrolyser need not supply its whole national demand locally.
+    if h2_enabled:
+        _write_demand_hydrogen(output_folder, profiles_df, selected_zones, selected_hours,
+                               scenario, loadlevels, sc_name)
+        _write_network_h2(output_folder, network_df, selected_zones, scenario)
     _write_variable_profiles(output_folder, profiles_df, tech_cap_df, gen_rows, selected_hours, scenario, loadlevels, sc_name)
     _write_reserve_files(output_folder, scenario, loadlevels, sc_name, unique_areas, area_fcr)
 

@@ -793,17 +793,45 @@ def load_hydrogen_demand_profiles(
     sheet_year_row = 9
     results: list[dict] = []
 
+    # Hydrogen has one demand sheet per country, named by that country's single H2
+    # node — which may be any of the country's zone codes or "<CC>00" (e.g. LU00,
+    # DKE1, SE01, ITN1). For a zone, try every same-country zone code plus "<CC>00"
+    # and use the first candidate that is an actual sheet (one sheet per country).
+    try:
+        _h2_sheets = set(_excel(paths[scenario]).sheet_names)
+    except Exception:
+        _h2_sheets = set()
+    country_zones: dict[str, list[str]] = {}
+    for z in node_df["Code"]:
+        country_zones.setdefault(str(z)[:2], []).append(str(z))
+
+    def _h2_sheet_for(prefix: str) -> str | None:
+        for cand in country_zones.get(prefix, []) + [f"{prefix}00"]:
+            if cand in _h2_sheets:
+                return cand
+        return None
+
+    _sheet_cache: dict[str, str | None] = {}
     for code in node_df["Code"]:
         if code not in selected_zones:
             continue
+        pref = str(code)[:2]
+        if pref not in _sheet_cache:
+            _sheet_cache[pref] = _h2_sheet_for(pref)
+        h2_sheet = _sheet_cache[pref]
+        if h2_sheet is None:
+            results.append({"Code": code, "Year": climate_year,
+                            "Data": np.zeros(selected_hours)})
+            continue
         entry = _load_excel_demand_profile(
             filepath=paths[scenario],
-            code=code,
+            code=h2_sheet,
             climate_year=climate_year,
             selected_hours=selected_hours,
             sheet_year_row=sheet_year_row,
             profile_key="Hydrogen Demand Profile",
         )
+        entry["Code"] = code   # key by the electricity zone, not the H2 sheet name
         results.append(entry)
 
     return {"Hydrogen Demand Profile": results}

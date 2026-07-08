@@ -856,8 +856,17 @@ def _write_demand_hydrogen(
     file switches on openTEPES' hydrogen carrier (pIndHydrogen).
     """
     all_nodes = list(zones) + [f"{z}_Exp" for z in zones]
+
+    # One H2 node per country: the country's H2 demand goes on its representative
+    # (first selected) zone; the country's other zones carry no H2 demand and reach
+    # the H2 network through the intra-country H2 links.
+    rep_zone: dict[str, str] = {}
+    for z in zones:
+        rep_zone.setdefault(str(z)[:2], z)
     h2_data: dict[str, np.ndarray] = {}
     for zone in zones:
+        if rep_zone.get(str(zone)[:2]) != zone:
+            continue
         arr = _get_profile(profiles_df, zone, "Hydrogen Demand Profile")
         h2_data[zone] = np.asarray(arr[:selected_hours], dtype=float) if arr is not None \
             else np.zeros(selected_hours)

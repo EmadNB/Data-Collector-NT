@@ -700,6 +700,7 @@ def _write_network_h2(
     network_df: dict[str, np.ndarray],
     zones: list[str],
     scenario: int,
+    rep_map: dict[str, str] | None = None,
 ) -> bool:
     """Write oT_Data_NetworkHydrogen.csv. Return True if any H2 lines written."""
     h2_cols = [
@@ -753,18 +754,23 @@ def _write_network_h2(
         })
         rows.append(line_row)
 
-    # Intra-country H2 links: a country has a single cross-border H2 node (mapped
-    # to its first selected zone), so connect that representative zone to the
-    # country's other selected zones with a high-capacity pipe — H2 flows freely
-    # within a country.
+    # Intra-country H2 links: a country has a single cross-border H2 node (its
+    # representative/main zone), so connect that node to the country's other
+    # selected zones with a high-capacity pipe — H2 flows freely within a country.
+    if rep_map is None:
+        rep_map = {}
+        for z in zones:
+            rep_map.setdefault(str(z)[:2], z)
     country_zones: dict[str, list] = {}
     for z in zones:
         country_zones.setdefault(str(z)[:2], []).append(z)
-    for _cc_zones in country_zones.values():
+    for _cc, _cc_zones in country_zones.items():
         if len(_cc_zones) < 2:
             continue
-        rep = _cc_zones[0]
-        for other in _cc_zones[1:]:
+        rep = rep_map.get(_cc, _cc_zones[0])
+        for other in _cc_zones:
+            if other == rep:
+                continue
             link = {c: "" for c in h2_cols}
             link.update({
                 "InitialNode":    rep,
@@ -848,6 +854,7 @@ def _write_demand_hydrogen(
     scenario: int,
     loadlevels: list[str],
     sc_name: str = "sc01",
+    rep_map: dict[str, str] | None = None,
 ) -> None:
     """Write oT_Data_DemandHydrogen.csv (H2 demand per node, kept in MW).
 
@@ -858,14 +865,16 @@ def _write_demand_hydrogen(
     all_nodes = list(zones) + [f"{z}_Exp" for z in zones]
 
     # One H2 node per country: the country's H2 demand goes on its representative
-    # (first selected) zone; the country's other zones carry no H2 demand and reach
-    # the H2 network through the intra-country H2 links.
-    rep_zone: dict[str, str] = {}
-    for z in zones:
-        rep_zone.setdefault(str(z)[:2], z)
+    # (main) zone; the country's other zones carry no H2 demand and reach the H2
+    # network through the intra-country H2 links.
+    if rep_map is None:
+        rep_map = {}
+        for z in zones:
+            rep_map.setdefault(str(z)[:2], z)
+    rep_nodes = set(rep_map.values())
     h2_data: dict[str, np.ndarray] = {}
     for zone in zones:
-        if rep_zone.get(str(zone)[:2]) != zone:
+        if zone not in rep_nodes:
             continue
         arr = _get_profile(profiles_df, zone, "Hydrogen Demand Profile")
         h2_data[zone] = np.asarray(arr[:selected_hours], dtype=float) if arr is not None \
@@ -1341,9 +1350,21 @@ def export_opentepes(
     # these switch on openTEPES' pIndHydrogen, so countries can trade H2 and an
     # electrolyser need not supply its whole national demand locally.
     if h2_enabled:
+        # Representative H2 node per country = the "main" zone from the Lines_H
+        # network (the node kept when it is selected), else the country's first
+        # selected zone. H2 demand and the intra-country links use this node.
+        _h2_cap_df = _network_to_df(network_df.get("Line Capacity (Hydrogen)"))
+        _sel_set = {str(z) for z in selected_zones}
+        h2_rep: dict[str, str] = {}
+        for _, _r in _h2_cap_df.iterrows():
+            for _node in (str(_r.iloc[0]), str(_r.iloc[1])):
+                if _node in _sel_set:
+                    h2_rep.setdefault(_node[:2], _node)
+        for z in selected_zones:
+            h2_rep.setdefault(str(z)[:2], str(z))
         _write_demand_hydrogen(output_folder, profiles_df, selected_zones, selected_hours,
-                               scenario, loadlevels, sc_name)
-        _write_network_h2(output_folder, network_df, selected_zones, scenario)
+                               scenario, loadlevels, sc_name, rep_map=h2_rep)
+        _write_network_h2(output_folder, network_df, selected_zones, scenario, rep_map=h2_rep)
     _write_variable_profiles(output_folder, profiles_df, tech_cap_df, gen_rows, selected_hours, scenario, loadlevels, sc_name)
     _write_reserve_files(output_folder, scenario, loadlevels, sc_name, unique_areas, area_fcr)
 

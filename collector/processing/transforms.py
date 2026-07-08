@@ -246,15 +246,34 @@ def filter_hydrogen_edges(
     col_map = {"PCI/PMI": (3, 4), "Advanced": (5, 6), "Less-Advanced": (7, 8)}
     from_col, to_col = col_map[hydrogen_pipe]
 
-    mask = (
-        edges_h_df["Start_Node"].astype(str).isin([str(z) for z in selected_zones]) |
-        edges_h_df["End_Node"].astype(str).isin([str(z) for z in selected_zones])
-    )
-    df = edges_h_df[mask].copy()
+    # The hydrogen network has one node per country whose code can differ from the
+    # electricity zone code (e.g. BEOF vs BE00, NLLL vs NL00, DKNS vs DKE1). Map
+    # each H2 endpoint to a selected electricity zone by country prefix (first two
+    # characters): keep it if it is already a selected zone, otherwise use the
+    # first selected zone of the same country.
+    sel = [str(z) for z in selected_zones]
+    sel_set = set(sel)
+    country_zone: dict[str, str] = {}
+    for z in sel:
+        country_zone.setdefault(z[:2], z)
+
+    def _to_zone(node: object) -> str:
+        n = str(node)
+        return n if n in sel_set else country_zone.get(n[:2], n)
+
+    df = edges_h_df.copy()
     df = df.rename(columns={
         df.columns[from_col]: "Capacity (From)",
         df.columns[to_col]:   "Capacity (To)",
     })
+    df["Start_Node"] = df["Start_Node"].map(_to_zone)
+    df["End_Node"]   = df["End_Node"].map(_to_zone)
+    # Keep only cross-border pipes whose (mapped) endpoints are both selected.
+    df = df[
+        df["Start_Node"].isin(sel_set)
+        & df["End_Node"].isin(sel_set)
+        & (df["Start_Node"] != df["End_Node"])
+    ].copy()
     df[["Capacity (From)", "Capacity (To)"]] = (
         df[["Capacity (From)", "Capacity (To)"]].astype(float) * GAS_UNIT_FACTOR
     )

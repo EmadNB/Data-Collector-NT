@@ -747,6 +747,32 @@ def _write_network_h2(
         })
         rows.append(line_row)
 
+    # Intra-country H2 links: a country has a single cross-border H2 node (mapped
+    # to its first selected zone), so connect that representative zone to the
+    # country's other selected zones with a high-capacity pipe — H2 flows freely
+    # within a country.
+    country_zones: dict[str, list] = {}
+    for z in zones:
+        country_zones.setdefault(str(z)[:2], []).append(z)
+    for _cc_zones in country_zones.values():
+        if len(_cc_zones) < 2:
+            continue
+        rep = _cc_zones[0]
+        for other in _cc_zones[1:]:
+            link = {c: "" for c in h2_cols}
+            link.update({
+                "InitialNode":    rep,
+                "FinalNode":      other,
+                "Circuit":        "AC1",
+                "InitialPeriod":  scenario,
+                "FinalPeriod":    scenario,
+                "Length":         0,
+                "TTC":            999999,
+                "TTCBck":         999999,
+                "SecurityFactor": 1,
+            })
+            rows.append(link)
+
     _csv(folder, "oT_Data_NetworkHydrogen.csv",
          pd.DataFrame(rows, columns=h2_cols) if rows else pd.DataFrame(columns=h2_cols))
     return len(rows) > 0

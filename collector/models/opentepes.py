@@ -599,6 +599,12 @@ def _get_length(loss_df: pd.DataFrame, frm: str, to: str) -> float:
     return 0.0
 
 
+# Per-unit impedance base for line reactance: Z_base = V_base^2 / S_base =
+# (400 kV)^2 / 100 MVA = 1600 ohm. Reactance is 0.4 ohm/km * length, made p.u.
+_REACTANCE_OHM_PER_KM = 0.4
+_Z_BASE_OHM = 400.0 ** 2 / 100.0
+
+
 def _write_network(
     folder: str,
     network_df: dict[str, np.ndarray],
@@ -650,7 +656,7 @@ def _write_network(
             "FinalPeriod":    scenario,
             "Length":         round(length, 4),
             "LossFactor":     round(loss, 4),
-            "Reactance":      round(0.4 * length, 4),
+            "Reactance":      round(_REACTANCE_OHM_PER_KM * length / _Z_BASE_OHM, 6),
             "TTC":            ttc,
             "TTCBck":         ttc_bck,
             "SecurityFactor": 1,

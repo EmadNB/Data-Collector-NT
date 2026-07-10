@@ -605,11 +605,28 @@ _REACTANCE_OHM_PER_KM = 0.4
 _Z_BASE_OHM = 400.0 ** 2 / 100.0
 
 
+def _zone_export_series(
+    export_df: "pd.DataFrame | None", zone: str, selected_hours: int
+) -> np.ndarray:
+    """Net hourly exports (MW) of *zone* to zones outside the selection."""
+    exp = np.zeros(selected_hours)
+    if isinstance(export_df, pd.DataFrame) and not export_df.empty:
+        exp_cols = [c for c in export_df.columns if str(c).startswith(f"Exports_{zone}_")]
+        if exp_cols:
+            net = export_df[exp_cols].apply(pd.to_numeric, errors="coerce").fillna(0).sum(axis=1)
+            net = np.asarray(net.to_numpy()[:selected_hours], dtype=float)
+            n = min(len(exp), len(net))
+            exp[:n] = net[:n]
+    return exp
+
+
 def _write_network(
     folder: str,
     network_df: dict[str, np.ndarray],
     zones: list[str],
     scenario: int,
+    export_df: "pd.DataFrame | None" = None,
+    selected_hours: int = 0,
 ) -> tuple[list[str], list[dict]]:
     """Write oT_Data_Network.csv (electricity only). Return (circuit_ids, rows)."""
     net_cols = [
@@ -672,12 +689,19 @@ def _write_network(
         })
         rows.append(line_row)
 
-    # Connect each electricity node to its auxiliary Exports node with a
-    # high-capacity line (reactance 0.1) so power can flow to serve its demand.
+    # Connect each electricity node to its auxiliary Exports node. The line
+    # capacity is the peak (max absolute) hourly net export of that zone to
+    # zones outside the selection; a zone with no external exchange gets 1e-6.
     cid = "AC1"
     if cid not in circuit_ids:
         circuit_ids.append(cid)
     for z in zones:
+        cap = 0.0
+        if selected_hours:
+            series = _zone_export_series(export_df, z, selected_hours)
+            if len(series):
+                cap = float(np.max(np.abs(series)))
+        cap = round(cap, 4) if cap > 0 else 1e-6
         for aux in (f"{z}_Exp",):
             aux_row = {c: "" for c in net_cols}
             aux_row.update({
@@ -691,8 +715,8 @@ def _write_network(
                 "Length":         0,
                 "LossFactor":     0,
                 "Reactance":      0.1,
-                "TTC":            100000,
-                "TTCBck":         100000,
+                "TTC":            cap,
+                "TTCBck":         cap,
                 "SecurityFactor": 1,
                 "BinaryInvestment": "",
             })
@@ -824,14 +848,7 @@ def _write_demand(
         demand_data[zone] = list(elec)
 
         # Net exports to zones outside the selection on the {zone}_Exp node
-        exp_demand = np.zeros(selected_hours)
-        if isinstance(export_df, pd.DataFrame) and not export_df.empty:
-            exp_cols = [c for c in export_df.columns if str(c).startswith(f"Exports_{zone}_")]
-            if exp_cols:
-                net = export_df[exp_cols].apply(pd.to_numeric, errors="coerce").fillna(0).sum(axis=1)
-                net = np.asarray(net.to_numpy()[:selected_hours], dtype=float)
-                n = min(len(exp_demand), len(net))
-                exp_demand[:n] = net[:n]
+        exp_demand = _zone_export_series(export_df, zone, selected_hours)
         demand_data[f"{zone}_Exp"] = list(exp_demand)
 
     all_nodes = list(zones) + [f"{z}_Exp" for z in zones]
@@ -1350,7 +1367,8 @@ def export_opentepes(
             gen_rows.append(row)
 
     # â"€â"€ Write Dict files â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
-    circuit_ids, _ = _write_network(output_folder, network_df, selected_zones, scenario)
+    circuit_ids, _ = _write_network(output_folder, network_df, selected_zones, scenario,
+                                    export_df=export_df, selected_hours=selected_hours)
     _write_dicts(output_folder, selected_zones, gen_rows, circuit_ids, loadlevels, scenario, all_technologies, sc_name, zone_to_area, unique_areas)
 
     # -- Write Data files ----------------------------------------------------

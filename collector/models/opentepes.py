@@ -604,6 +604,11 @@ def _get_length(loss_df: pd.DataFrame, frm: str, to: str) -> float:
 _REACTANCE_OHM_PER_KM = 0.4
 _Z_BASE_OHM = 400.0 ** 2 / 100.0
 
+# Default electrolyser efficiency used when a zone has electrolyser capacity but
+# a blank/zero efficiency in the source PEMMDB data (the value all other zones
+# report). Feeds ProductionFunctionH2 = 1000 / efficiency.
+_DEFAULT_ELECTROLYSER_EFF = 0.68
+
 
 def _zone_export_series(
     export_df: "pd.DataFrame | None", zone: str, selected_hours: int
@@ -1303,11 +1308,15 @@ def export_opentepes(
             # Electrolyser: real efficiency goes into ProductionFunctionH2
             # (electricity per unit H2 = 1/efficiency; H2 demand is kept in MW).
             # Only when the hydrogen carrier is enabled; Efficiency column stays 1.
+            # Some zones (e.g. HR/HU/IE/SI) have electrolyser capacity but a blank
+            # efficiency in the source data; fall back to the default so the
+            # electrolyser can still produce H2 instead of being left non-functional.
             prod_func_h2 = 0.0
             if cap_col == "Electrolyser (MW)" and h2_enabled:
                 _eff = _get_char(tech_char_df, zone, "Efficiency (%)", battery_idx + 1, 0.0)
-                if _eff > 0:
-                    prod_func_h2 = round(1000.0 / _eff, 6)
+                if _eff <= 0:
+                    _eff = _DEFAULT_ELECTROLYSER_EFF
+                prod_func_h2 = round(1000.0 / _eff, 6)
 
             # LinearTerm (heat rate) is only defined for thermal units and DSR;
             # everything else uses an efficiency of 1 (→ LinearTerm = 1).

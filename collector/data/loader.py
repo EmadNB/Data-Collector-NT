@@ -141,25 +141,6 @@ def load_network_edges(
     return edges_e, edges_g, edges_h
 
 
-# Storages/Terminals hold daily-energy capacities (GWh/day); convert every
-# value to an hourly power rate in MW: value / 24 h/day * 1000 MW/GW.
-_STORAGE_TERMINAL_FACTOR = 1000.0 / 24.0
-
-
-def _scale_capacity_values(df: pd.DataFrame) -> pd.DataFrame:
-    """Scale every numeric value column of a Storages/Terminals table by
-    ``_STORAGE_TERMINAL_FACTOR`` (÷24 ×1000). Identifier columns (``Zones``,
-    ``Code``) and non-numeric sub-header cells (e.g. Injection/Withdraw) are
-    left untouched."""
-    out = df.copy()
-    for col in out.columns:
-        if col in ("Zones", "Code"):
-            continue
-        num = pd.to_numeric(out[col], errors="coerce")
-        out[col] = (num * _STORAGE_TERMINAL_FACTOR).where(num.notna(), out[col])
-    return out
-
-
 def load_network_storages(
     scenario: int,
     filepath: str = FILEPATH_STORAGES,
@@ -180,8 +161,8 @@ def load_network_storages(
     Example:
         >>> storages_g, storages_h = load_network_storages(2030)
     """
-    storages_g = _scale_capacity_values(pd.read_excel(filepath, sheet_name=f"Storage_G ({scenario})"))
-    storages_h = _scale_capacity_values(pd.read_excel(filepath, sheet_name=f"Storage_H ({scenario})"))
+    storages_g = pd.read_excel(filepath, sheet_name=f"Storage_G ({scenario})")
+    storages_h = pd.read_excel(filepath, sheet_name=f"Storage_H ({scenario})")
     return storages_g, storages_h
 
 
@@ -205,8 +186,8 @@ def load_network_terminals(
     Example:
         >>> terminals_g, terminals_h = load_network_terminals(2030)
     """
-    terminals_g = _scale_capacity_values(pd.read_excel(filepath, sheet_name=f"Terminal_G ({scenario})"))
-    terminals_h = _scale_capacity_values(pd.read_excel(filepath, sheet_name=f"Terminal_H ({scenario})"))
+    terminals_g = pd.read_excel(filepath, sheet_name=f"Terminal_G ({scenario})")
+    terminals_h = pd.read_excel(filepath, sheet_name=f"Terminal_H ({scenario})")
     return terminals_g, terminals_h
 
 

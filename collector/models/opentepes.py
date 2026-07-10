@@ -737,14 +737,12 @@ def _write_network_h2(
             ttc_bck = float(row.iloc[3])
         except Exception:
             pass
-        # Drop pipes with no capacity in either direction; if only one direction
-        # is zero, floor it to 1e-6 (1 W) so the pipe stays modelled.
+        # Drop pipes with no capacity in either direction; scale real capacities
+        # to the H2 demand units (/1000); a one-sided zero is floored to 1e-6.
         if ttc == 0 and ttc_bck == 0:
             continue
-        if ttc == 0:
-            ttc = 1e-6
-        if ttc_bck == 0:
-            ttc_bck = 1e-6
+        ttc     = ttc / 1000.0     if ttc != 0     else 1e-6
+        ttc_bck = ttc_bck / 1000.0 if ttc_bck != 0 else 1e-6
         length = 0.0
         if not loss_df.empty:
             match = loss_df[
@@ -795,8 +793,8 @@ def _write_network_h2(
                 "InitialPeriod":  scenario,
                 "FinalPeriod":    scenario,
                 "Length":         0,
-                "TTC":            100000,
-                "TTCBck":         100000,
+                "TTC":            100,
+                "TTCBck":         100,
                 "SecurityFactor": 1,
             })
             rows.append(link)
@@ -902,7 +900,7 @@ def _write_demand_hydrogen(
         for node in all_nodes:
             col = h2_data.get(node)
             v = float(col[i]) if (col is not None and i < len(col)) else 0.0
-            row[node] = round(v, 4)
+            row[node] = round(v / 1000.0, 6)
         rows.append(row)
     _csv(folder, "oT_Data_DemandHydrogen.csv", pd.DataFrame(rows))
 
@@ -1292,7 +1290,7 @@ def export_opentepes(
             if cap_col == "Electrolyser (MW)" and h2_enabled:
                 _eff = _get_char(tech_char_df, zone, "Efficiency (%)", battery_idx + 1, 0.0)
                 if _eff > 0:
-                    prod_func_h2 = round(1.0 / _eff, 6)
+                    prod_func_h2 = round(1000.0 / _eff, 6)
 
             # LinearTerm (heat rate) is only defined for thermal units and DSR;
             # everything else uses an efficiency of 1 (→ LinearTerm = 1).

@@ -640,6 +640,14 @@ def _write_network(
             ttc_bck = float(row.iloc[3])
         except Exception:
             pass
+        # Drop lines with no capacity in either direction; if only one direction
+        # is zero, floor it to 1e-6 (1 W) so the line stays modelled.
+        if ttc == 0 and ttc_bck == 0:
+            continue
+        if ttc == 0:
+            ttc = 1e-6
+        if ttc_bck == 0:
+            ttc_bck = 1e-6
         loss = _get_loss_fraction(loss_df, frm, to)
         length = _get_length(loss_df, frm, to)
         cid = "AC1"
@@ -683,8 +691,8 @@ def _write_network(
                 "Length":         0,
                 "LossFactor":     0,
                 "Reactance":      0.1,
-                "TTC":            999999,
-                "TTCBck":         999999,
+                "TTC":            100000,
+                "TTCBck":         100000,
                 "SecurityFactor": 1,
                 "BinaryInvestment": "",
             })
@@ -729,6 +737,14 @@ def _write_network_h2(
             ttc_bck = float(row.iloc[3])
         except Exception:
             pass
+        # Drop pipes with no capacity in either direction; if only one direction
+        # is zero, floor it to 1e-6 (1 W) so the pipe stays modelled.
+        if ttc == 0 and ttc_bck == 0:
+            continue
+        if ttc == 0:
+            ttc = 1e-6
+        if ttc_bck == 0:
+            ttc_bck = 1e-6
         length = 0.0
         if not loss_df.empty:
             match = loss_df[
@@ -748,8 +764,8 @@ def _write_network_h2(
             "InitialPeriod":  scenario,
             "FinalPeriod":    scenario,
             "Length":         round(length, 1),
-            "TTC":            round(ttc, 4),
-            "TTCBck":         round(ttc_bck, 4),
+            "TTC":            round(ttc, 6),
+            "TTCBck":         round(ttc_bck, 6),
             "SecurityFactor": 1,
         })
         rows.append(line_row)
@@ -779,8 +795,8 @@ def _write_network_h2(
                 "InitialPeriod":  scenario,
                 "FinalPeriod":    scenario,
                 "Length":         0,
-                "TTC":            999999,
-                "TTCBck":         999999,
+                "TTC":            100000,
+                "TTCBck":         100000,
                 "SecurityFactor": 1,
             })
             rows.append(link)

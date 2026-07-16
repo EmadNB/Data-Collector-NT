@@ -7,6 +7,7 @@ import os
 import numpy as np
 import pandas as pd
 
+from collector.models.opentepes import h2_main_zones
 from collector.utils.config import TECH_COLUMNS, build_tech_columns
 from collector.utils.helpers import expand_profile_to_hourly
 
@@ -513,6 +514,16 @@ def export_all_zones(
         ...                  storage, terminals, network, 8736,
         ...                  ["ES00", "PT00"], "Outputs/Excel Files/Normal")
     """
+    # Hydrogen demand is a country-level total tied to the country's single H2
+    # node, but the loader assigns it to every zone of the country. Keep it only
+    # on the main/representative zone (the Lines_H node, matching the openTEPES
+    # export) and zero the country's other zones so the per-zone workbooks don't
+    # duplicate the national total.
+    _h2_main = set(h2_main_zones(network_df, selected_zones).values())
+    for _entry in profiles_df.get("Hydrogen Demand Profile", []):
+        if str(_entry.get("Code")) not in _h2_main and _entry.get("Data") is not None:
+            _entry["Data"] = np.zeros_like(np.asarray(_entry["Data"], dtype=float))
+
     for zone in selected_zones:
         export_zone_data(
             zone_name=zone,

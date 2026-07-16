@@ -568,6 +568,26 @@ def _network_to_df(data) -> pd.DataFrame:
         return pd.DataFrame()
 
 
+def h2_main_zones(network_df: dict, selected_zones: list[str]) -> dict[str, str]:
+    """Map each country prefix to its single hydrogen node (the "main" zone).
+
+    The node is the country's endpoint in the H2 network (``Lines_H``) when that
+    endpoint is selected, else the country's first selected zone. Hydrogen demand
+    and the intra-country H2 links attach to this node — used by both the
+    openTEPES export and the Normal export so they stay consistent.
+    """
+    cap_df = _network_to_df(network_df.get("Line Capacity (Hydrogen)")) if network_df else pd.DataFrame()
+    sel_set = {str(z) for z in selected_zones}
+    rep: dict[str, str] = {}
+    for _, r in cap_df.iterrows():
+        for node in (str(r.iloc[0]), str(r.iloc[1])):
+            if node in sel_set:
+                rep.setdefault(node[:2], node)
+    for z in selected_zones:
+        rep.setdefault(str(z)[:2], str(z))
+    return rep
+
+
 def _get_loss_fraction(loss_df: pd.DataFrame, frm: str, to: str) -> float:
     if loss_df.empty:
         return 0.0
@@ -1394,15 +1414,7 @@ def export_opentepes(
         # Representative H2 node per country = the "main" zone from the Lines_H
         # network (the node kept when it is selected), else the country's first
         # selected zone. H2 demand and the intra-country links use this node.
-        _h2_cap_df = _network_to_df(network_df.get("Line Capacity (Hydrogen)"))
-        _sel_set = {str(z) for z in selected_zones}
-        h2_rep: dict[str, str] = {}
-        for _, _r in _h2_cap_df.iterrows():
-            for _node in (str(_r.iloc[0]), str(_r.iloc[1])):
-                if _node in _sel_set:
-                    h2_rep.setdefault(_node[:2], _node)
-        for z in selected_zones:
-            h2_rep.setdefault(str(z)[:2], str(z))
+        h2_rep = h2_main_zones(network_df, selected_zones)
         _write_demand_hydrogen(output_folder, profiles_df, selected_zones, selected_hours,
                                scenario, loadlevels, sc_name, rep_map=h2_rep)
         _write_network_h2(output_folder, network_df, selected_zones, scenario, rep_map=h2_rep)

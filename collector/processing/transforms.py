@@ -338,10 +338,11 @@ def filter_hydrogen_storages(
 ) -> pd.DataFrame:
     """Filter hydrogen storage rows and select capacity columns for the scenario.
 
-    Column index mapping:
-    * ``'PCI/PMI'``       → columns 3–4
-    * ``'Advanced'``      → columns 5–6
-    * ``'Less-Advanced'`` → columns 7–8
+    Column index mapping (the sheet has two leading columns, ``Zones`` and
+    ``Code``, then Injection/Withdraw pairs per scenario):
+    * ``'PCI/PMI'``       → columns 2–3 (Injection, Withdraw)
+    * ``'Advanced'``      → columns 4–5
+    * ``'Less-Advanced'`` → columns 6–7
 
     Values are converted from GWh/day to MW.
 
@@ -362,7 +363,7 @@ def filter_hydrogen_storages(
         >>> filtered = filter_hydrogen_storages(storages_h, ["ES00"], "PCI/PMI")
     """
     validate_option(hydrogen_storage, HYDROGEN_STORAGE_OPTIONS, "hydrogen_storage")
-    col_map = {"PCI/PMI": (3, 4), "Advanced": (5, 6), "Less-Advanced": (7, 8)}
+    col_map = {"PCI/PMI": (2, 3), "Advanced": (4, 5), "Less-Advanced": (6, 7)}
     inj_col, wdraw_col = col_map[hydrogen_storage]
 
     mask = storages_h_df["Code"].astype(str).isin([str(z) for z in selected_zones])
@@ -424,10 +425,11 @@ def filter_hydrogen_terminals(
 ) -> pd.DataFrame:
     """Filter hydrogen terminal rows and select the import capacity column.
 
-    Column index mapping:
-    * ``'PCI/PMI'``       → column 3
-    * ``'Advanced'``      → column 4
-    * ``'Less-Advanced'`` → column 5
+    Column index mapping (two leading columns, ``Zones`` and ``Code``, then one
+    import-capacity column per scenario):
+    * ``'PCI/PMI'``       → column 2
+    * ``'Advanced'``      → column 3
+    * ``'Less-Advanced'`` → column 4
 
     Values are converted from GWh/day to MW.
 
@@ -447,7 +449,7 @@ def filter_hydrogen_terminals(
         >>> filtered = filter_hydrogen_terminals(terminals_h, ["ES00"], "PCI/PMI")
     """
     validate_option(hydrogen_terminal, HYDROGEN_TERMINAL_OPTIONS, "hydrogen_terminal")
-    col_map = {"PCI/PMI": 3, "Advanced": 4, "Less-Advanced": 5}
+    col_map = {"PCI/PMI": 2, "Advanced": 3, "Less-Advanced": 4}
     imp_col = col_map[hydrogen_terminal]
 
     mask = terminals_h_df["Code"].astype(str).isin([str(z) for z in selected_zones])

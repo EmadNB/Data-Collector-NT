@@ -7,7 +7,11 @@ import os
 import numpy as np
 import pandas as pd
 
-from collector.models.opentepes import _DEFAULT_ELECTROLYSER_EFF, h2_main_zones
+from collector.models.opentepes import (
+    _DEFAULT_ELECTROLYSER_EFF,
+    h2_intra_country_pairs,
+    h2_main_zones,
+)
 from collector.utils.config import TECH_COLUMNS, build_tech_columns
 from collector.utils.helpers import expand_profile_to_hourly
 
@@ -409,10 +413,17 @@ def _build_assets_df(
 # ---------------------------------------------------------------------------
 
 
+# Capacity (MW) of the virtual intra-country H2 links in Networks.xlsx — the
+# high-capacity placeholder that lets H2 flow freely within a country (mirrors
+# the openTEPES intra-country link value of 200, expressed on the Normal MW scale).
+_H2_INTRA_CAP_MW = 200000.0
+
+
 def export_network_data(
     network_df: dict[str, np.ndarray],
     output_folder: str,
     commodity_prices: dict[str, float] | None = None,
+    selected_zones: list[str] | None = None,
 ) -> None:
     """Write loss fractions and line capacities for all carriers to ``Networks.xlsx``.
 
@@ -454,6 +465,33 @@ def export_network_data(
                                 ("Hydrogen",    "Hydrogen Pipelines")]:
             loss_df = _to_df(f"Loss Fraction ({carrier})",   loss_cols)
             cap_df  = _to_df(f"Line Capacity ({carrier})",   cap_cols)
+            # Add the virtual intra-country H2 links (main zone -> the country's
+            # other selected zones) to both the loss (first) and capacity (second)
+            # tables, mirroring the openTEPES hydrogen network. They are internal
+            # links, so length and loss are zero.
+            if carrier == "Hydrogen" and selected_zones:
+                rep_map = h2_main_zones(network_df, selected_zones)
+                pairs = h2_intra_country_pairs(rep_map, selected_zones)
+                if pairs and loss_df is not None:
+                    virt_loss = [
+                        {"From": rep, "To": other, "Length (km)": 0, "Loss Fraction (%)": 0}
+                        for rep, other in pairs
+                    ]
+                    loss_df = pd.concat(
+                        [loss_df, pd.DataFrame(virt_loss, columns=loss_cols)],
+                        ignore_index=True,
+                    )
+                if pairs and cap_df is not None:
+                    virt_cap = [
+                        {"From": rep, "To": other,
+                         "From-To Capacity (MW)": _H2_INTRA_CAP_MW,
+                         "To-From Capacity (MW)": _H2_INTRA_CAP_MW}
+                        for rep, other in pairs
+                    ]
+                    cap_df = pd.concat(
+                        [cap_df, pd.DataFrame(virt_cap, columns=cap_cols)],
+                        ignore_index=True,
+                    )
             if loss_df is not None:
                 loss_df.to_excel(writer, sheet_name=sheet, index=False, startrow=0, startcol=0)
             if cap_df is not None:
@@ -544,4 +582,4 @@ def export_all_zones(
             lignite_groups=lignite_groups,
         )
     export_network_data(network_df=network_df, output_folder=output_folder,
-                        commodity_prices=commodity_prices)
+                        commodity_prices=commodity_prices, selected_zones=selected_zones)

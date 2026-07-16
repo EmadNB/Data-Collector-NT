@@ -588,6 +588,26 @@ def h2_main_zones(network_df: dict, selected_zones: list[str]) -> dict[str, str]
     return rep
 
 
+def h2_intra_country_pairs(rep_map: dict[str, str], zones: list[str]) -> list[tuple[str, str]]:
+    """(main, other) pairs linking each country's other selected zones to its main
+    H2 node — the intra-country "virtual" H2 links. A country has a single
+    cross-border H2 node, so its other zones reach the network through these
+    links. Used by both the openTEPES and the Normal (Networks.xlsx) exports.
+    """
+    country_zones: dict[str, list] = {}
+    for z in zones:
+        country_zones.setdefault(str(z)[:2], []).append(z)
+    pairs: list[tuple[str, str]] = []
+    for cc, cc_zones in country_zones.items():
+        if len(cc_zones) < 2:
+            continue
+        rep = rep_map.get(cc, cc_zones[0])
+        for other in cc_zones:
+            if str(other) != str(rep):
+                pairs.append((str(rep), str(other)))
+    return pairs
+
+
 def _get_loss_fraction(loss_df: pd.DataFrame, frm: str, to: str) -> float:
     if loss_df.empty:
         return 0.0
@@ -824,29 +844,20 @@ def _write_network_h2(
         rep_map = {}
         for z in zones:
             rep_map.setdefault(str(z)[:2], z)
-    country_zones: dict[str, list] = {}
-    for z in zones:
-        country_zones.setdefault(str(z)[:2], []).append(z)
-    for _cc, _cc_zones in country_zones.items():
-        if len(_cc_zones) < 2:
-            continue
-        rep = rep_map.get(_cc, _cc_zones[0])
-        for other in _cc_zones:
-            if other == rep:
-                continue
-            link = {c: "" for c in h2_cols}
-            link.update({
-                "InitialNode":    rep,
-                "FinalNode":      other,
-                "Circuit":        "AC1",
-                "InitialPeriod":  scenario,
-                "FinalPeriod":    scenario,
-                "Length":         0,
-                "TTC":            100,
-                "TTCBck":         100,
-                "SecurityFactor": 1,
-            })
-            rows.append(link)
+    for rep, other in h2_intra_country_pairs(rep_map, zones):
+        link = {c: "" for c in h2_cols}
+        link.update({
+            "InitialNode":    rep,
+            "FinalNode":      other,
+            "Circuit":        "AC1",
+            "InitialPeriod":  scenario,
+            "FinalPeriod":    scenario,
+            "Length":         0,
+            "TTC":            200,
+            "TTCBck":         200,
+            "SecurityFactor": 1,
+        })
+        rows.append(link)
 
     _csv(folder, "oT_Data_NetworkHydrogen.csv",
          pd.DataFrame(rows, columns=h2_cols) if rows else pd.DataFrame(columns=h2_cols))

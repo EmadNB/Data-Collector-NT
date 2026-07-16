@@ -7,7 +7,7 @@ import os
 import numpy as np
 import pandas as pd
 
-from collector.models.opentepes import h2_main_zones
+from collector.models.opentepes import _DEFAULT_ELECTROLYSER_EFF, h2_main_zones
 from collector.utils.config import TECH_COLUMNS, build_tech_columns
 from collector.utils.helpers import expand_profile_to_hourly
 
@@ -353,6 +353,10 @@ def _build_tech_char_excel(tech_char_df: pd.DataFrame, zone_name: str,
                 out.loc[row_title, col] = ", ".join(map(str, value))
             else:
                 if col == "Efficiency (%)" and isinstance(value, (int, float)):
+                    # Electrolysers with a blank/zero source efficiency default to
+                    # 68% (matching the openTEPES ProductionFunctionH2 fallback).
+                    if row_title == "Electrolyser (MW)" and (pd.isna(value) or value <= 0):
+                        value = _DEFAULT_ELECTROLYSER_EFF
                     value = value * 100
                 out.loc[row_title, col] = value
 

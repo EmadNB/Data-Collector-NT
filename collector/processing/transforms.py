@@ -268,10 +268,11 @@ def filter_hydrogen_edges(
     })
     df["Start_Node"] = df["Start_Node"].map(_to_zone)
     df["End_Node"]   = df["End_Node"].map(_to_zone)
-    # Keep only cross-border pipes whose (mapped) endpoints are both selected.
+    # Keep pipes with at least one (mapped) endpoint selected — matching the
+    # electricity and gas edge filters, so boundary pipes (one end outside the
+    # selection) also appear in the Networks capacity table.
     df = df[
-        df["Start_Node"].isin(sel_set)
-        & df["End_Node"].isin(sel_set)
+        (df["Start_Node"].isin(sel_set) | df["End_Node"].isin(sel_set))
         & (df["Start_Node"] != df["End_Node"])
     ].copy()
     df[["Capacity (From)", "Capacity (To)"]] = (

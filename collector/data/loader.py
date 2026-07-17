@@ -699,6 +699,114 @@ def load_crossborder_exchanges(
     return pd.DataFrame(export_df_dict)
 
 
+def load_crossborder_h2_exchanges(
+    scenario: int,
+    selected_hours: int,
+    selected_zones: list[str],
+    main_zone_map: dict[str, str],
+) -> pd.DataFrame:
+    """Load cross-border hydrogen exchange flows from the MM output file.
+
+    Reads the ``Crossborder H2 exchanges`` worksheet, whose headers are
+    country-level H2 nodes (e.g. ``AT_H2->DE_H2``). For every flow between a
+    selected country and a non-selected neighbour, a column is produced named
+    ``H2Exports_<main zone>_<neighbour> (MW/h)``, where *<main zone>* is the
+    selected country's main H2 node (from *main_zone_map*, as used for H2
+    demand). A country neighbour appears as ``<CC>00``; all external source nodes
+    (``XDZ``, ``XMA``, ``XNO``, ``XUA``, ``XAmmonia`` …) are summed into the main
+    zone's single ``H2Exports_<main zone> (MW/h)`` column. Sign follows the export
+    convention — a flow *from* the selected country is positive, a flow *into* it
+    is negated — mirroring :func:`load_crossborder_exchanges`.
+
+    Args:
+        scenario (int): Scenario year used to build the file path.
+        selected_hours (int): Number of hourly rows to read.
+        selected_zones (list[str]): Zone codes that define the study area.
+        main_zone_map (dict[str, str]): Country prefix -> main H2 zone code.
+
+    Returns:
+        pd.DataFrame: One column per selected-country/neighbour H2 flow, one row
+            per hour. Empty if the worksheet is absent.
+
+    Raises:
+        FileNotFoundError: When the MM output workbook is not found.
+    """
+    filepath = f"inputs/MMStandardOutputFile_NT{scenario}_Plexos_CY2009_2.5_v40.xlsx"
+    selected_countries = {str(z)[:2] for z in selected_zones}
+
+    wb = openpyxl.load_workbook(filepath, data_only=True, read_only=True)
+    if "Crossborder H2 exchanges" not in wb.sheetnames:
+        wb.close()
+        return pd.DataFrame()
+    ws = wb["Crossborder H2 exchanges"]
+
+    header_row = 11
+    headers: list[tuple[int, str]] = []
+    col_idx = 3
+    while True:
+        val = ws.cell(row=header_row, column=col_idx).value
+        if val is None or str(val).strip() == "":
+            break
+        headers.append((col_idx, str(val).strip()))
+        col_idx += 1
+
+    def _cc(node: str) -> str:
+        n = str(node).strip()
+        return n[:-3] if n.endswith("_H2") else n
+
+    # col -> (output column name, direction). Sign follows the export convention:
+    # when the selected zone is the start node the flow is positive ("from"),
+    # when it is the end node the flow is negated ("to"). Only flows to a
+    # non-selected neighbour are kept.
+    # Neighbour naming: a country node ("XX_H2") becomes "XX00" in
+    # "H2Exports_<main>_<CC>00"; every external source node (XDZ, XMA, XNO, XUA,
+    # XAmmonia — codes starting with "X") is collapsed onto the main zone's single
+    # "H2Exports_<main>" column, so all X.. flows sum (with the export sign).
+    col_spec: dict[int, tuple[str, str]] = {}
+    for col, header in headers:
+        if "->" not in header:
+            continue
+        left, right = [p.strip() for p in header.split("->", 1)]
+        xc, yc = _cc(left), _cc(right)
+        if xc in selected_countries and yc not in selected_countries:
+            interested, neigh_raw, neigh_cc, direction = xc, right, yc, "from"
+        elif yc in selected_countries and xc not in selected_countries:
+            interested, neigh_raw, neigh_cc, direction = yc, left, xc, "to"
+        else:
+            continue
+        main = main_zone_map.get(interested, f"{interested}00")
+        if str(neigh_raw).startswith("X"):
+            name = f"H2Exports_{main} (MW/h)"           # aggregated external sources
+        elif str(neigh_raw).endswith("_H2"):
+            name = f"H2Exports_{main}_{neigh_cc}00 (MW/h)"
+        else:
+            name = f"H2Exports_{main}_{neigh_raw} (MW/h)"
+        col_spec[col] = (name, direction)
+
+    row_start = header_row + 1
+    row_end = row_start + selected_hours
+    col_data: dict[int, list] = {}
+    for col in sorted(col_spec):
+        col_data[col] = [
+            v[0] for v in ws.iter_rows(
+                min_row=row_start, max_row=row_end - 1,
+                min_col=col, max_col=col, values_only=True,
+            )
+        ]
+    wb.close()
+
+    out: dict[str, list] = {}
+    for col, (name, direction) in col_spec.items():
+        raw = col_data[col]
+        values = raw if direction == "from" else [(-v if v is not None else None) for v in raw]
+        if name in out:  # net if both directions somehow present for a pair
+            out[name] = [(a or 0) + (b or 0) for a, b in zip(out[name], values)]
+        else:
+            out[name] = values
+
+    return pd.DataFrame(out)
+
+
 # ---------------------------------------------------------------------------
 # Demand profile loaders
 # ---------------------------------------------------------------------------

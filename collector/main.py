@@ -32,6 +32,7 @@ from collector.data.loader import (
     load_commodity_prices,
     load_lignite_groups,
     load_crossborder_exchanges,
+    load_crossborder_h2_exchanges,
     load_network_edges,
     load_network_storages,
     load_network_terminals,
@@ -41,7 +42,7 @@ from collector.data.loader import (
     load_tech_characteristics,
 )
 from collector.models.core import export_all_zones
-from collector.models.opentepes import export_opentepes
+from collector.models.opentepes import export_opentepes, h2_main_zones
 from collector.processing.transforms import (
     build_network_data,
     build_storage_data,
@@ -233,6 +234,18 @@ def _pipeline(
         print(f"Warning: cross-border exchange file not found – {exc}")
         import pandas as pd
         export_df = pd.DataFrame()
+
+    # Hydrogen cross-border exchanges: attach each country's flows to its main
+    # H2 zone (the Lines_H node, as used for H2 demand), as H2Exports_* columns.
+    try:
+        import pandas as pd
+        h2_export_df = load_crossborder_h2_exchanges(
+            scenario, hours, zones, h2_main_zones(network_df, zones),
+        )
+        if not h2_export_df.empty:
+            export_df = pd.concat([export_df, h2_export_df], axis=1)
+    except FileNotFoundError as exc:
+        print(f"Warning: hydrogen cross-border exchange file not found – {exc}")
 
     # ── Step 6: profiles ─────────────────────────────────────────────────────
     print("\n=== Loading generation and demand profiles ===")

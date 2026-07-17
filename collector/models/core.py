@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 
 import numpy as np
 import pandas as pd
@@ -210,8 +211,13 @@ def export_zone_data(
     else:
         hourly_out = pd.DataFrame()
 
-    # Merge in cross-border exports
-    export_cols = export_df.filter(like=f"Exports_{zone_name}_", axis=1).copy()
+    # Merge in cross-border exports. Match "Exports_<zone>" followed by "_" (a
+    # per-neighbour column) or " " (the aggregated H2Exports_<zone> external
+    # column) so both route to this zone without matching longer zone codes
+    # (e.g. PL00 must not catch PL00E).
+    export_cols = export_df.filter(
+        regex=rf"Exports_{re.escape(zone_name)}(_| )", axis=1
+    ).copy()
     export_cols.index = export_cols.index + 1
     merged = hourly_out.merge(export_cols, left_index=True, right_index=True, how="outer")
 

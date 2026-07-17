@@ -716,7 +716,9 @@ def load_crossborder_h2_exchanges(
     (``XDZ``, ``XMA``, ``XNO``, ``XUA``, ``XAmmonia`` …) are summed into the main
     zone's single ``H2Exports_<main zone> (MW/h)`` column. Sign follows the export
     convention — a flow *from* the selected country is positive, a flow *into* it
-    is negated — mirroring :func:`load_crossborder_exchanges`.
+    is negated — mirroring :func:`load_crossborder_exchanges`. ``IB*``
+    interconnector hubs are resolved end to end (``A->IBIT->IT`` is treated as
+    ``A->IT``).
 
     Args:
         scenario (int): Scenario year used to build the file path.
@@ -754,19 +756,44 @@ def load_crossborder_h2_exchanges(
         n = str(node).strip()
         return n[:-3] if n.endswith("_H2") else n
 
-    # col -> (output column name, direction). Sign follows the export convention:
-    # when the selected zone is the start node the flow is positive ("from"),
-    # when it is the end node the flow is negated ("to"). Only flows to a
-    # non-selected neighbour are kept.
-    # Neighbour naming: a country node ("XX_H2") becomes "XX00" in
-    # "H2Exports_<main>_<CC>00"; every external source node (XDZ, XMA, XNO, XUA,
-    # XAmmonia — codes starting with "X") is collapsed onto the main zone's single
-    # "H2Exports_<main>" column, so all X.. flows sum (with the export sign).
-    col_spec: dict[int, tuple[str, str]] = {}
+    # Resolve IB* interconnector hubs (e.g. IBIT_H2, IBFI_H2), which pass H2
+    # between a source side (A->hub) and a sink side (hub->B). Each "A->hub"
+    # segment becomes a direct "A->B" edge carrying the A->hub value, for every
+    # sink B; the aggregate "hub->B" edges are dropped (the sources carry the
+    # flow). Example: AT_H2->IBIT_H2 plus IBIT_H2->IT_H2 -> AT_H2->IT_H2.
+    def _is_hub(node: str) -> bool:
+        return str(node).startswith("IB") and str(node).endswith("_H2")
+
+    hub_sinks: dict[str, list[str]] = {}
+    for _, header in headers:
+        if "->" not in header:
+            continue
+        left, right = [p.strip() for p in header.split("->", 1)]
+        if _is_hub(left) and not _is_hub(right):
+            hub_sinks.setdefault(left, []).append(right)
+
+    edges: list[tuple[str, str, int]] = []  # (left node, right node, source col)
     for col, header in headers:
         if "->" not in header:
             continue
         left, right = [p.strip() for p in header.split("->", 1)]
+        if _is_hub(left):
+            continue  # aggregate hub->sink edge; dropped
+        if _is_hub(right):
+            for sink in hub_sinks.get(right, []):
+                edges.append((left, sink, col))
+        else:
+            edges.append((left, right, col))
+
+    # (source col, output column name, direction). Sign follows the export
+    # convention: the selected zone as start node -> positive ("from"), as end
+    # node -> negated ("to"). Only flows to a non-selected neighbour are kept.
+    # Neighbour naming: a country node ("XX_H2") becomes "XX00" in
+    # "H2Exports_<main>_<CC>00"; every external source node (XDZ, XMA, XNO, XUA,
+    # XAmmonia — codes starting with "X") is collapsed onto the main zone's single
+    # "H2Exports_<main>" column, so all X.. flows sum (with the export sign).
+    specs: list[tuple[int, str, str]] = []
+    for left, right, col in edges:
         xc, yc = _cc(left), _cc(right)
         if xc in selected_countries and yc not in selected_countries:
             interested, neigh_raw, neigh_cc, direction = xc, right, yc, "from"
@@ -781,12 +808,12 @@ def load_crossborder_h2_exchanges(
             name = f"H2Exports_{main}_{neigh_cc}00 (MW/h)"
         else:
             name = f"H2Exports_{main}_{neigh_raw} (MW/h)"
-        col_spec[col] = (name, direction)
+        specs.append((col, name, direction))
 
     row_start = header_row + 1
     row_end = row_start + selected_hours
     col_data: dict[int, list] = {}
-    for col in sorted(col_spec):
+    for col in sorted({c for c, _, _ in specs}):
         col_data[col] = [
             v[0] for v in ws.iter_rows(
                 min_row=row_start, max_row=row_end - 1,
@@ -796,10 +823,10 @@ def load_crossborder_h2_exchanges(
     wb.close()
 
     out: dict[str, list] = {}
-    for col, (name, direction) in col_spec.items():
+    for col, name, direction in specs:
         raw = col_data[col]
         values = raw if direction == "from" else [(-v if v is not None else None) for v in raw]
-        if name in out:  # net if both directions somehow present for a pair
+        if name in out:  # sum flows mapping to the same column (X.. sources, hub sinks)
             out[name] = [(a or 0) + (b or 0) for a, b in zip(out[name], values)]
         else:
             out[name] = values

@@ -651,12 +651,17 @@ _DEFAULT_ELECTROLYSER_EFF = 0.68
 
 
 def _zone_export_series(
-    export_df: "pd.DataFrame | None", zone: str, selected_hours: int
+    export_df: "pd.DataFrame | None", zone: str, selected_hours: int,
+    prefix: str = "Exports",
 ) -> np.ndarray:
-    """Net hourly exports (MW) of *zone* to zones outside the selection."""
+    """Net hourly exports of *zone* to zones outside the selection.
+
+    Sums every ``<prefix>_<zone>_*`` column (electricity uses ``Exports``,
+    hydrogen ``H2Exports``). Units follow the source columns (MW).
+    """
     exp = np.zeros(selected_hours)
     if isinstance(export_df, pd.DataFrame) and not export_df.empty:
-        exp_cols = [c for c in export_df.columns if str(c).startswith(f"Exports_{zone}_")]
+        exp_cols = [c for c in export_df.columns if str(c).startswith(f"{prefix}_{zone}_")]
         if exp_cols:
             net = export_df[exp_cols].apply(pd.to_numeric, errors="coerce").fillna(0).sum(axis=1)
             net = np.asarray(net.to_numpy()[:selected_hours], dtype=float)
@@ -778,6 +783,8 @@ def _write_network_h2(
     zones: list[str],
     scenario: int,
     rep_map: dict[str, str] | None = None,
+    export_df: "pd.DataFrame | None" = None,
+    selected_hours: int = 0,
 ) -> bool:
     """Write oT_Data_NetworkHydrogen.csv. Return True if any H2 lines written."""
     h2_cols = [
@@ -859,6 +866,31 @@ def _write_network_h2(
         })
         rows.append(link)
 
+    # Aux H2 export lines: connect each main zone to its {main}_Exp node, which
+    # carries the country's net H2 exchange with outside the selection. Capacity
+    # is the peak |net H2 export|, scaled to H2 units (/1000); 1e-6 if none.
+    rep_nodes = list(dict.fromkeys(rep_map.get(str(z)[:2], z) for z in zones))
+    for rep in rep_nodes:
+        cap = 0.0
+        if selected_hours:
+            series = _zone_export_series(export_df, rep, selected_hours, prefix="H2Exports")
+            if len(series):
+                cap = float(np.max(np.abs(series))) / 1000.0
+        cap = round(cap, 6) if cap > 0 else 1e-6
+        link = {c: "" for c in h2_cols}
+        link.update({
+            "InitialNode":    rep,
+            "FinalNode":      f"{rep}_Exp",
+            "Circuit":        "AC1",
+            "InitialPeriod":  scenario,
+            "FinalPeriod":    scenario,
+            "Length":         0,
+            "TTC":            cap,
+            "TTCBck":         cap,
+            "SecurityFactor": 1,
+        })
+        rows.append(link)
+
     _csv(folder, "oT_Data_NetworkHydrogen.csv",
          pd.DataFrame(rows, columns=h2_cols) if rows else pd.DataFrame(columns=h2_cols))
     return len(rows) > 0
@@ -922,6 +954,7 @@ def _write_demand_hydrogen(
     loadlevels: list[str],
     sc_name: str = "sc01",
     rep_map: dict[str, str] | None = None,
+    export_df: "pd.DataFrame | None" = None,
 ) -> None:
     """Write oT_Data_DemandHydrogen.csv (H2 demand per node, kept in MW).
 
@@ -946,6 +979,11 @@ def _write_demand_hydrogen(
         arr = _get_profile(profiles_df, zone, "Hydrogen Demand Profile")
         h2_data[zone] = np.asarray(arr[:selected_hours], dtype=float) if arr is not None \
             else np.zeros(selected_hours)
+        # Net H2 export to outside the selection sits on the main zone's aux Exp
+        # node (H2Exports_<main>_* columns; scaled to H2 units by the /1000 below).
+        h2_data[f"{zone}_Exp"] = _zone_export_series(
+            export_df, zone, selected_hours, prefix="H2Exports"
+        )
 
     rows = []
     for i, ll in enumerate(loadlevels):
@@ -1427,8 +1465,9 @@ def export_opentepes(
         # selected zone. H2 demand and the intra-country links use this node.
         h2_rep = h2_main_zones(network_df, selected_zones)
         _write_demand_hydrogen(output_folder, profiles_df, selected_zones, selected_hours,
-                               scenario, loadlevels, sc_name, rep_map=h2_rep)
-        _write_network_h2(output_folder, network_df, selected_zones, scenario, rep_map=h2_rep)
+                               scenario, loadlevels, sc_name, rep_map=h2_rep, export_df=export_df)
+        _write_network_h2(output_folder, network_df, selected_zones, scenario, rep_map=h2_rep,
+                          export_df=export_df, selected_hours=selected_hours)
     _write_variable_profiles(output_folder, profiles_df, tech_cap_df, gen_rows, selected_hours, scenario, loadlevels, sc_name)
     _write_reserve_files(output_folder, scenario, loadlevels, sc_name, unique_areas, area_fcr)
 

@@ -628,7 +628,9 @@ def load_crossborder_exchanges(
 
     Returns:
         pd.DataFrame: Columns named ``Exports_<zone>_<neighbour> (MW/h)`` with
-            one row per hour.
+            one row per hour. External source nodes (codes starting with "X",
+            e.g. XRU00, XSA00, XTN00, XMD00, XBACE — not in the edge table) are
+            summed into the zone's single ``Exports_<zone>_XX (MW/h)`` column.
 
     Raises:
         FileNotFoundError: When the MM output workbook is not found.
@@ -658,26 +660,36 @@ def load_crossborder_exchanges(
         headers.append((col_idx, str(val).strip()))
         col_idx += 1
 
-    zone_node_lookup: dict[tuple[str, str], tuple[str, int, str]] = {}
+    # (source col, output column name, direction). A normal neighbour present in
+    # the network edge table becomes "Exports_<zone>_<node>"; every external
+    # source node (codes starting with "X" — e.g. XRU00, XSA00, XTN00, XMD00,
+    # XBACE — not in the edge table) is summed into the zone's single
+    # "Exports_<zone>" column. Sign: "from" (zone is start) positive, "to" (zone
+    # is end) negated.
+    specs: list[tuple[int, str, str]] = []
     for col, header in headers:
         for zone in selected_zones:
             zone_str = str(zone)
             if header.startswith(f"{zone_str}->"):
-                node = header.split("->")[1]
+                node = header.split("->", 1)[1]
                 direction = "from"
             elif header.endswith(f"->{zone_str}"):
-                node = header.split("->")[0]
+                node = header.split("->", 1)[0]
                 direction = "to"
             else:
                 continue
-            if node in unique_nodes_no_selected:
-                zone_node_lookup[(zone_str, node)] = (header, col, direction)
+            if str(node).startswith("X"):
+                name = f"Exports_{zone_str}_XX (MW/h)"        # aggregated external sources
+            elif node in unique_nodes_no_selected:
+                name = f"Exports_{zone_str}_{node} (MW/h)"
+            else:
+                continue
+            specs.append((col, name, direction))
 
-    cols_needed = sorted({col for (_, col, _) in zone_node_lookup.values()})
     row_start = header_row + 1
     row_end = row_start + selected_hours
     col_data: dict[int, list] = {}
-    for col in cols_needed:
+    for col in sorted({c for c, _, _ in specs}):
         col_data[col] = [
             v[0] for v in ws.iter_rows(
                 min_row=row_start, max_row=row_end - 1,
@@ -688,13 +700,13 @@ def load_crossborder_exchanges(
     wb.close()
 
     export_df_dict: dict[str, list] = {}
-    for (zone, node), (_, col, direction) in zone_node_lookup.items():
+    for col, name, direction in specs:
         raw = col_data[col]
-        if direction == "from":
-            values = raw
+        values = raw if direction == "from" else [-v if v is not None else None for v in raw]
+        if name in export_df_dict:  # sum external sources aggregated on one zone
+            export_df_dict[name] = [(a or 0) + (b or 0) for a, b in zip(export_df_dict[name], values)]
         else:
-            values = [-v if v is not None else None for v in raw]
-        export_df_dict[f"Exports_{zone}_{node} (MW/h)"] = values
+            export_df_dict[name] = values
 
     return pd.DataFrame(export_df_dict)
 
@@ -714,7 +726,7 @@ def load_crossborder_h2_exchanges(
     selected country's main H2 node (from *main_zone_map*, as used for H2
     demand). A country neighbour appears as ``<CC>00``; all external source nodes
     (``XDZ``, ``XMA``, ``XNO``, ``XUA``, ``XAmmonia`` …) are summed into the main
-    zone's single ``H2Exports_<main zone> (MW/h)`` column. Sign follows the export
+    zone's single ``H2Exports_<main zone>_XX (MW/h)`` column. Sign follows the export
     convention — a flow *from* the selected country is positive, a flow *into* it
     is negated — mirroring :func:`load_crossborder_exchanges`. ``IB*``
     interconnector hubs are resolved end to end (``A->IBIT->IT`` is treated as
@@ -803,7 +815,7 @@ def load_crossborder_h2_exchanges(
             continue
         main = main_zone_map.get(interested, f"{interested}00")
         if str(neigh_raw).startswith("X"):
-            name = f"H2Exports_{main} (MW/h)"           # aggregated external sources
+            name = f"H2Exports_{main}_XX (MW/h)"        # aggregated external sources
         elif str(neigh_raw).endswith("_H2"):
             name = f"H2Exports_{main}_{neigh_cc}00 (MW/h)"
         else:

@@ -726,7 +726,9 @@ def load_crossborder_h2_exchanges(
     selected country's main H2 node (from *main_zone_map*, as used for H2
     demand). A country neighbour appears as ``<CC>00``; all external source nodes
     (``XDZ``, ``XMA``, ``XNO``, ``XUA``, ``XAmmonia`` …) are summed into the main
-    zone's single ``H2Exports_<main zone>_XX (MW/h)`` column. Sign follows the export
+    zone's single ``H2Exports_<main zone>_XX (MW/h)`` column, from which steam
+    methane reformer (SMR) production (``Hourly H2 Data`` sheet) is subtracted so
+    it counts as imported hydrogen. Sign follows the export
     convention — a flow *from* the selected country is positive, a flow *into* it
     is negated — mirroring :func:`load_crossborder_exchanges`. ``IB*``
     interconnector hubs are resolved end to end (``A->IBIT->IT`` is treated as
@@ -832,6 +834,34 @@ def load_crossborder_h2_exchanges(
                 min_col=col, max_col=col, values_only=True,
             )
         ]
+
+    # Steam methane reformer (SMR) production per country — treated as imported
+    # hydrogen and folded into the main zone's H2Exports_<main>_XX column. Sheet
+    # "Hourly H2 Data": row 11 category, row 12 country, row 13 sub-header, hourly
+    # data from row 14; each country block has one "Steam methane reformer" column.
+    smr_by_main: dict[str, list] = {}
+    if "Hourly H2 Data" in wb.sheetnames:
+        sws = wb["Hourly H2 Data"]
+        smr_data_start = 14
+        c = 3
+        while c < 3000:
+            cat = sws.cell(row=11, column=c).value
+            ctry = sws.cell(row=12, column=c).value
+            if cat is None and ctry is None:
+                break
+            if cat and "Steam methane reformer" in str(cat) and ctry:
+                cc = str(ctry)[:-3] if str(ctry).endswith("_H2") else str(ctry)
+                if cc in selected_countries:
+                    main = main_zone_map.get(cc, f"{cc}00")
+                    smr_by_main[main] = [
+                        v[0] for v in sws.iter_rows(
+                            min_row=smr_data_start,
+                            max_row=smr_data_start + selected_hours - 1,
+                            min_col=c, max_col=c, values_only=True,
+                        )
+                    ]
+            c += 1
+
     wb.close()
 
     out: dict[str, list] = {}
@@ -842,6 +872,16 @@ def load_crossborder_h2_exchanges(
             out[name] = [(a or 0) + (b or 0) for a, b in zip(out[name], values)]
         else:
             out[name] = values
+
+    # Fold SMR in as imported hydrogen: subtract it from H2Exports_<main>_XX (a
+    # supply is a negative export). Create the column when the zone has SMR but no
+    # external X.. sources.
+    for main, smr in smr_by_main.items():
+        name = f"H2Exports_{main}_XX (MW/h)"
+        if name in out:
+            out[name] = [(a or 0) - (s or 0) for a, s in zip(out[name], smr)]
+        else:
+            out[name] = [-(s or 0) for s in smr]
 
     return pd.DataFrame(out)
 

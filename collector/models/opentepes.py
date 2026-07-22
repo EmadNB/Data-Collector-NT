@@ -985,13 +985,29 @@ def _write_demand_hydrogen(
             export_df, zone, selected_hours, prefix="H2Exports"
         )
 
+    # Nodes whose demand is zero at every load level: keep them blank rather than
+    # applying the 1e-6 floor (don't invent demand for a node that never has any).
+    all_zero_nodes = {
+        node for node in all_nodes
+        if not any(
+            round(float(v) / 1000.0, 6) != 0
+            for v in (h2_data.get(node, np.zeros(selected_hours))[:selected_hours])
+        )
+    }
+
     rows = []
     for i, ll in enumerate(loadlevels):
         row: dict = {"Period": scenario, "Scenario": sc_name, "LoadLevel": ll}
         for node in all_nodes:
             col = h2_data.get(node)
             v = float(col[i]) if (col is not None and i < len(col)) else 0.0
-            row[node] = round(v / 1000.0, 6)
+            fv = round(v / 1000.0, 6)
+            if fv != 0:
+                row[node] = fv
+            elif node in all_zero_nodes:
+                row[node] = ""       # all-zero column: leave blank, no floor
+            else:
+                row[node] = 1e-6     # floor when demand is 0 this hour
         rows.append(row)
     _csv(folder, "oT_Data_DemandHydrogen.csv", pd.DataFrame(rows))
 

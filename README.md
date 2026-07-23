@@ -1,9 +1,9 @@
 # Data Collector-NT (v1.0)
 
 **Data Collector-NT** builds datasets for the ENTSO-E / ENTSO-G **National Trends (NT)**
-scenario. The **-NT** suffix denotes that the underlying source data (demand, capacities,
-prices, cross-border exchanges, etc.) is drawn from the *National Trends* pathway of the
-TYNDP.
+scenario, using the **2024-published** edition of the TYNDP source data. The **-NT**
+suffix denotes that the underlying source data (demand, capacities, prices, cross-border
+exchanges, etc.) is drawn from the *National Trends* pathway of the TYNDP.
 
 A tool for assembling **pan-European power, gas and hydrogen system datasets** for
 energy-system modelling. It reads the raw [ENTSO-E](https://www.entsoe.eu/) and
@@ -250,15 +250,17 @@ All input data is taken from the publicly published *Ten-Year Network Developmen
 
 ## Data limitations by scenario
 
-Not every dataset is published for every TYNDP scenario year. The pipeline degrades
-gracefully (it warns in `Processing.log` and fills gaps with zeros) but you should be
-aware of the following:
+At the time this tool was written, not every dataset could be found for every TYNDP
+scenario year within the source files used. These limitations reflect what could be
+located during development, not a claim about what ENTSO-E or ENTSO-G do or don't
+publish overall. The pipeline degrades gracefully (it warns in `Processing.log` and
+fills gaps with zeros) but you should be aware of the following:
 
 | Limitation | Affected scenario(s) | Effect |
 | --- | --- | --- |
-| **Hydrogen demand profiles** are only published for 2030 and 2040 | **2050** | Generating for 2050 raises an error / omits H₂ demand; H₂-into-electricity demand conversion is unavailable. |
-| **Cross-border exchange** results are published only for the **2009 climate year**, and only for the **2030 and 2040** scenarios | **2050**, and **any non-2009 climate year** | For **2050** the exchange series are unavailable, so exports-to-demand contributions are zero. For **2030 / 2040** the exchange always uses **climate year 2009**, regardless of the climate year you select — the selection is ignored for exchanges. |
-| **Gas price is not available for the 2050 scenario** — the *Gas blend NT+* row has no 2050 value in the TYNDP price sheet | **2050** | `Gas Price (EUR/MWh)` is unavailable and falls back to 0 for 2050. |
+| **Hydrogen demand profiles** could only be found for 2030 and 2040 | **2050** | Generating for 2050 raises an error / omits H₂ demand; H₂-into-electricity demand conversion is unavailable. |
+| **Cross-border exchange** results could only be found for the **2009 climate year**, and only for the **2030 and 2040** scenarios | **2050**, and **any non-2009 climate year** | For **2050** the exchange series are unavailable, so exports-to-demand contributions are zero. For **2030 / 2040** the exchange always uses **climate year 2009**, regardless of the climate year you select — the selection is ignored for exchanges. |
+| **Gas price could not be found for the 2050 scenario** — the *Gas blend NT+* row has no 2050 value in the TYNDP price sheet used | **2050** | `Gas Price (EUR/MWh)` is unavailable and falls back to 0 for 2050. |
 | Some technologies / DSR types may be absent for a given zone | any | Missing entries are skipped rather than written as zero rows. |
 
 Always check `Processing.log` after a run — any skipped source file is reported there.

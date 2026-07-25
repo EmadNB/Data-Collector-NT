@@ -37,6 +37,8 @@ from collector.data.loader import (
     load_network_storages,
     load_network_terminals,
     load_nodes,
+    load_plexos_h2_demand_profiles,
+    load_plexos_line_max_flows,
     load_reserve_requirements,
     load_tech_capacities,
     load_tech_characteristics,
@@ -44,6 +46,7 @@ from collector.data.loader import (
 from collector.models.core import export_all_zones
 from collector.models.opentepes import export_opentepes, h2_main_zones
 from collector.processing.transforms import (
+    apply_plexos_line_capacities,
     build_network_data,
     build_storage_data,
     build_terminal_data,
@@ -93,6 +96,7 @@ def run(
     selected_hydrogen_terminal: str = "PCI/PMI",
     selected_output: str = "Normal",
     selected_generate_html: bool = False,
+    selected_data_correction: bool = False,
     base_path: str = ".",
 ) -> None:
     """Execute the full data collection, processing, visualisation, and export pipeline.
@@ -170,6 +174,7 @@ def run(
             hydrogen_terminal=selected_hydrogen_terminal,
             output_mode=selected_output,
             generate_html=selected_generate_html,
+            data_correction=selected_data_correction,
         )
     finally:
         if base_path != ".":
@@ -189,6 +194,7 @@ def _pipeline(
     hydrogen_terminal: str,
     output_mode: str,
     generate_html: bool = False,
+    data_correction: bool = False,
 ) -> None:
     """Internal pipeline implementation (all paths relative to cwd)."""
 
@@ -225,6 +231,16 @@ def _pipeline(
     storage_df  = build_storage_data(storages_g, storages_h, zones, gas_storage, hydrogen_storage)
     terminal_df = build_terminal_data(terminals_g, terminals_h, zones, gas_terminal, hydrogen_terminal)
 
+    # Data correction: replace electricity & hydrogen line capacities with the
+    # peak PLEXOS flow on each line (so flow <= capacity holds).
+    if data_correction:
+        print("\n=== Data correction: overriding line capacities from PLEXOS flows ===")
+        try:
+            elec_max, h2_max = load_plexos_line_max_flows(scenario, hours)
+            network_df = apply_plexos_line_capacities(network_df, elec_max, h2_max)
+        except FileNotFoundError as exc:
+            print(f"Warning: PLEXOS result file not found, skipping capacity correction – {exc}")
+
     # ── Step 5: cross-border exchanges ───────────────────────────────────────
     print("\n=== Loading cross-border exchanges ===")
     filtered_e = filter_electricity_edges(edges_e, zones)
@@ -251,6 +267,16 @@ def _pipeline(
     print("\n=== Loading generation and demand profiles ===")
     profiles_df = load_all_profiles(node_df, zones, scenario, climate_year, hours)
     profiles_df = normalise_profiles_to_hourly(profiles_df, hours)
+
+    # Data correction: replace the H2 demand profile with the PLEXOS "Demand"
+    # values from the market-model results (instead of the NT_<year>.xlsx profile).
+    if data_correction:
+        print("\n=== Data correction: overriding H2 demand from PLEXOS results ===")
+        try:
+            plexos_h2 = load_plexos_h2_demand_profiles(node_df, zones, scenario, hours)
+            profiles_df["Hydrogen Demand Profile"] = plexos_h2["Hydrogen Demand Profile"]
+        except FileNotFoundError as exc:
+            print(f"Warning: PLEXOS result file not found, skipping H2 demand correction – {exc}")
 
     # Load TYNDP 2024 commodity prices and Lignite country groups
     commodity_prices = load_commodity_prices(scenario)

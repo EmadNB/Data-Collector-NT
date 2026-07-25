@@ -402,6 +402,7 @@ async function main() {
   const climateEl          = document.getElementById("climate-year-select");
   const outputModeEl       = document.getElementById("output-mode-select");
   const generateHtmlEl     = document.getElementById("generate-html-select");
+  const dataCorrectionEl   = document.getElementById("data-correction-select");
   const hoursEl            = document.getElementById("hours-input");
   const gasPipeEl          = document.getElementById("gas-pipe-select");
   const hydrogenPipeEl     = document.getElementById("hydrogen-pipe-select");
@@ -419,6 +420,7 @@ async function main() {
   if (climateEl && meta.climate_year)            climateEl.value          = meta.climate_year;
   if (outputModeEl && meta.output_mode)          outputModeEl.value       = meta.output_mode;
   if (generateHtmlEl && meta.generate_html)      generateHtmlEl.value     = meta.generate_html;
+  if (dataCorrectionEl && meta.data_correction)  dataCorrectionEl.value   = meta.data_correction;
   if (hoursEl && meta.hours)                     hoursEl.value            = meta.hours;
   if (gasPipeEl && meta.gas_pipe)                gasPipeEl.value          = meta.gas_pipe;
   if (hydrogenPipeEl && meta.hydrogen_pipe)      hydrogenPipeEl.value     = meta.hydrogen_pipe;
@@ -459,6 +461,7 @@ async function main() {
   bindMeta(climateEl,          "climate_year");
   bindMeta(outputModeEl,       "output_mode");
   bindMeta(generateHtmlEl,     "generate_html");
+  bindMeta(dataCorrectionEl,   "data_correction");
   bindMeta(gasPipeEl,          "gas_pipe");
   bindMeta(hydrogenPipeEl,     "hydrogen_pipe");
   bindMeta(gasStorageEl,       "gas_storage");

@@ -556,6 +556,41 @@ def build_storage_data(
     }
 
 
+def apply_plexos_line_capacities(
+    network_df: dict[str, np.ndarray],
+    elec_max: dict[tuple[str, str], float],
+    h2_max: dict[frozenset, float],
+) -> dict[str, np.ndarray]:
+    """Data correction: overwrite electricity and hydrogen line capacities with
+    the peak PLEXOS flow on each line (max |flow|), so the modelled network can
+    carry what the market model actually flowed. Capacity arrays are
+    ``[Start, End, Capacity(From), Capacity(To)]``; both directions get the peak.
+    Electricity matches on node codes; hydrogen matches on country prefixes."""
+    e = network_df.get("Line Capacity (Electricity)")
+    if e is not None and len(e):
+        e = np.array(e, dtype=object)
+        for row in e:
+            a, b = str(row[0]), str(row[1])
+            mf = elec_max.get((a, b))
+            if mf is None:
+                mf = elec_max.get((b, a))
+            if mf is not None:
+                row[2] = mf
+                row[3] = mf
+        network_df["Line Capacity (Electricity)"] = e
+
+    h = network_df.get("Line Capacity (Hydrogen)")
+    if h is not None and len(h):
+        h = np.array(h, dtype=object)
+        for row in h:
+            mf = h2_max.get(frozenset({str(row[0])[:2], str(row[1])[:2]}))
+            if mf is not None:
+                row[2] = mf
+                row[3] = mf
+        network_df["Line Capacity (Hydrogen)"] = h
+    return network_df
+
+
 def build_terminal_data(
     terminals_g_df: pd.DataFrame,
     terminals_h_df: pd.DataFrame,

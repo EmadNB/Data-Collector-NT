@@ -61,6 +61,7 @@ _META_VALIDATORS: dict[str, Any] = {
     "output_mode":       lambda v: v in OUTPUT_MODES,
     "hours":             lambda v: str(v).isdigit() and 1 <= int(v) <= 8760,
     "generate_html":     lambda v: v in ("yes", "no"),
+    "data_correction":   lambda v: v in ("yes", "no"),
 }
 
 _META_DEFAULTS: dict[str, str] = {
@@ -75,6 +76,7 @@ _META_DEFAULTS: dict[str, str] = {
     "output_mode":       "Normal",
     "hours":             "8736",
     "generate_html":     "no",
+    "data_correction":   "no",
 }
 
 
@@ -208,6 +210,7 @@ def generate(request: HttpRequest) -> HttpResponse:
                 selected_hydrogen_terminal=_get("hydrogen_terminal"),
                 selected_output=_get("output_mode"),
                 selected_generate_html=(_get("generate_html") == "yes"),
+                selected_data_correction=(_get("data_correction") == "yes"),
                 base_path=settings.COLLECTOR_BASE_PATH,
             )
         finally:

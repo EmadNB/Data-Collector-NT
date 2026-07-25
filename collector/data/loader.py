@@ -887,6 +887,115 @@ def load_crossborder_h2_exchanges(
 
 
 # ---------------------------------------------------------------------------
+# Data correction — use PLEXOS market-model results instead of input assumptions
+# ---------------------------------------------------------------------------
+
+
+def load_plexos_line_max_flows(
+    scenario: int, selected_hours: int,
+) -> tuple[dict[tuple[str, str], float], dict[frozenset, float]]:
+    """Peak |hourly flow| per line from the PLEXOS crossborder sheets.
+
+    Used by the "Data Correction" option to replace input line capacities with
+    the maximum flow the market model actually used (so flow <= capacity holds).
+
+    Returns:
+        tuple:
+          * electricity: ``{(start_node, end_node): max_abs_flow_MW}`` (zone codes)
+          * hydrogen:    ``{frozenset({countryA, countryB}): max_abs_flow_MW}``
+            with IB* interconnector hubs resolved end to end.
+    """
+    filepath = f"inputs/MMStandardOutputFile_NT{scenario}_Plexos_CY2009_2.5_v40.xlsx"
+    wb = openpyxl.load_workbook(filepath, data_only=True, read_only=True)
+
+    def _header_max(sheet: str) -> dict[str, float]:
+        ws = wb[sheet]
+        rows = list(ws.iter_rows(values_only=True))
+        hdr = rows[10]                       # row 11 = headers
+        res: dict[str, float] = {}
+        for c in range(2, len(hdr)):
+            h = hdr[c]
+            if not h or "->" not in str(h):
+                continue
+            mx = 0.0
+            for rw in rows[11:11 + selected_hours]:
+                v = rw[c]
+                if isinstance(v, (int, float)):
+                    a = abs(v)
+                    if a > mx:
+                        mx = a
+            res[str(h).strip()] = mx
+        return res
+
+    elec_h = _header_max("Crossborder exchanges")
+    h2_h = _header_max("Crossborder H2 exchanges")
+    wb.close()
+
+    elec: dict[tuple[str, str], float] = {}
+    for k, v in elec_h.items():
+        a, b = [p.strip() for p in k.split("->", 1)]
+        elec[(a, b)] = v
+
+    def _cc(n: str) -> str:
+        return n[:-3] if n.endswith("_H2") else n
+
+    hub_sinks: dict[str, list[str]] = {}
+    for k in h2_h:
+        l, r = [p.strip() for p in k.split("->", 1)]
+        if l.startswith("IB") and l.endswith("_H2") and not (r.startswith("IB") and r.endswith("_H2")):
+            hub_sinks.setdefault(l, []).append(r)
+
+    h2: dict[frozenset, float] = {}
+    for k, v in h2_h.items():
+        l, r = [p.strip() for p in k.split("->", 1)]
+        if l.startswith("IB") and l.endswith("_H2"):
+            continue
+        dests = hub_sinks.get(r, [r]) if (r.startswith("IB") and r.endswith("_H2")) else [r]
+        for d in dests:
+            key = frozenset({_cc(l), _cc(d)})
+            if len(key) == 2:
+                h2[key] = max(h2.get(key, 0.0), v)
+    return elec, h2
+
+
+def load_plexos_h2_demand_profiles(
+    node_df: pd.DataFrame,
+    selected_zones: list[str],
+    scenario: int,
+    selected_hours: int,
+) -> dict[str, list[dict]]:
+    """Hydrogen demand profiles taken from the PLEXOS ``Hourly H2 Data`` sheet
+    (``Demand [MWH2]`` per country) instead of the ENTSO-E ``NT_<year>.xlsx``
+    profiles. Same shape as :func:`load_hydrogen_demand_profiles`; each selected
+    zone carries its country's PLEXOS H2 demand (in MW)."""
+    filepath = f"inputs/MMStandardOutputFile_NT{scenario}_Plexos_CY2009_2.5_v40.xlsx"
+    wb = openpyxl.load_workbook(filepath, data_only=True, read_only=True)
+    ws = wb["Hourly H2 Data"]
+    rows = list(ws.iter_rows(values_only=True))
+    cat, ctry = rows[10], rows[11]           # row 11 category, row 12 country
+    dem_col: dict[str, int] = {}
+    for c in range(2, len(cat)):
+        if cat[c] and str(cat[c]).startswith("Demand") and ctry[c]:
+            cc = str(ctry[c])[:-3] if str(ctry[c]).endswith("_H2") else str(ctry[c])
+            dem_col[cc] = c
+    series: dict[str, np.ndarray] = {cc: np.zeros(selected_hours) for cc in dem_col}
+    for i, rw in enumerate(rows[13:13 + selected_hours]):   # data from row 14
+        for cc, c in dem_col.items():
+            v = rw[c]
+            if isinstance(v, (int, float)):
+                series[cc][i] = v
+    wb.close()
+
+    results: list[dict] = []
+    for code in node_df["Code"]:
+        if code not in selected_zones:
+            continue
+        data = series.get(str(code)[:2], np.zeros(selected_hours))
+        results.append({"Code": code, "Year": None, "Data": np.asarray(data, dtype=float)})
+    return {"Hydrogen Demand Profile": results}
+
+
+# ---------------------------------------------------------------------------
 # Demand profile loaders
 # ---------------------------------------------------------------------------
 

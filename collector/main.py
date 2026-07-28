@@ -216,9 +216,9 @@ def _pipeline(
 
     # ── Step 3: technology data ──────────────────────────────────────────────
     print("\n=== Loading technology capacities ===")
-    tech_cap_df  = load_tech_capacities(node_df, zones, scenario, hours)
+    tech_cap_df  = load_tech_capacities(node_df, zones, scenario, hours, climate_year)
     print("\n=== Loading technology characteristics ===")
-    tech_char_df = load_tech_characteristics(node_df, zones, scenario)
+    tech_char_df = load_tech_characteristics(node_df, zones, scenario, climate_year)
     print("\n=== Loading reserve requirements ===")
     reserve_df   = load_reserve_requirements(node_df, zones, scenario)
 

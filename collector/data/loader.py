@@ -90,6 +90,38 @@ def _dsr_cols(n_dsr: int) -> list[str]:
     return [get_column_letter(3 + i) for i in range(n_dsr)]
 
 
+def _dsr_climate_year_mask(filepath: str, width: int, climate_year: int | None) -> np.ndarray:
+    """Boolean mask (length *width*) of a zone's DSR type columns applicable to *climate_year*.
+
+    Each DSR type column (C..) on the sheet carries its own "Climate year
+    start" / "Climate year end" pair (rows 13-14): some bands apply to the
+    full climate-year range, others are duplicated per single climate year
+    (e.g. separate columns valid only for 1995, 2008, or 2009). A column is
+    included only when *climate_year* falls within its [start, end] range,
+    inclusive; columns with no bounds default to included. When
+    *climate_year* is unknown or the sheet can't be read, no column is
+    excluded.
+    """
+    if width <= 0:
+        return np.zeros(0, dtype=bool)
+    if climate_year is None:
+        return np.ones(width, dtype=bool)
+    try:
+        bounds = pd.read_excel(
+            _excel(filepath), sheet_name="DSR",
+            usecols=f"C:{get_column_letter(2 + width)}", header=None,
+            skiprows=12, nrows=2,
+        )
+    except Exception:
+        return np.ones(width, dtype=bool)
+    mask = np.ones(width, dtype=bool)
+    for _i in range(min(width, bounds.shape[1])):
+        start, end = bounds.iat[0, _i], bounds.iat[1, _i]
+        if pd.notna(start) and pd.notna(end):
+            mask[_i] = start <= climate_year <= end
+    return mask
+
+
 # ---------------------------------------------------------------------------
 # Node / network raw loaders
 # ---------------------------------------------------------------------------
@@ -208,6 +240,7 @@ def load_tech_capacities(
     selected_zones: list[str],
     scenario: int,
     selected_hours: int,
+    climate_year: int | None = None,
 ) -> pd.DataFrame:
     """Load installed technology capacity data from PEMMDB Excel files.
 
@@ -223,6 +256,11 @@ def load_tech_capacities(
         scenario (int): Scenario year (``2030``, ``2040``, or ``2050``).
         selected_hours (int): Number of hourly values to read for time-series
             columns (e.g. ``8736``).
+        climate_year (int | None): Climate year to extract. Each DSR type
+            column carries its own "Climate year start"/"Climate year end"
+            range; only columns whose range includes *climate_year*
+            (inclusive of both bounds) are included, others are zeroed. When
+            ``None``, no DSR column is excluded.
 
     Returns:
         pd.DataFrame: One row per zone with columns defined by
@@ -230,7 +268,7 @@ def load_tech_capacities(
 
     Example:
         >>> nodes = load_nodes()
-        >>> cap_df = load_tech_capacities(nodes, ["ES00", "PT00"], 2030, 8736)
+        >>> cap_df = load_tech_capacities(nodes, ["ES00", "PT00"], 2030, 8736, 2009)
         >>> "Nuclear (MW)" in cap_df.columns
         True
     """
@@ -245,9 +283,9 @@ def load_tech_capacities(
         try:
             _read_thermal_capacities(filepath, data)
             _read_hydro_capacities(filepath, data)
-            _read_res_capacities(filepath, data, n_dsr)
+            _read_res_capacities(filepath, data, n_dsr, climate_year)
             _read_storage_capacities(filepath, data)
-            _read_timeseries_capacities(filepath, data, selected_hours, n_dsr)
+            _read_timeseries_capacities(filepath, data, selected_hours, n_dsr, climate_year)
             tech_rows.append(data)
             print(f"Technology capacities for {code}: OK")
         except FileNotFoundError:
@@ -329,7 +367,8 @@ def _read_hydro_capacities(filepath: str, data: dict) -> None:
     data["Hydro (closed_ps_pump) (MW)"]   = _cell("B", 22)
 
 
-def _read_res_capacities(filepath: str, data: dict, n_dsr: int = DSR_DEFAULT_COUNT) -> None:
+def _read_res_capacities(filepath: str, data: dict, n_dsr: int = DSR_DEFAULT_COUNT,
+                         climate_year: int | None = None) -> None:
     """Populate *data* with RES and additional technology capacity values."""
     def _cell(sheet: str, col: str, row: int, scale: float = 1.0) -> float:
         return _read_scalar(filepath, sheet, col, row) * scale
@@ -348,8 +387,9 @@ def _read_res_capacities(filepath: str, data: dict, n_dsr: int = DSR_DEFAULT_COU
     data["Other RES (marine) (MW)"]              = _cell("Other RES", "G", 8)
     data["Other RES (waste) (MW)"]               = _cell("Other RES", "H", 8)
     data["Other RES (unknown) (MW)"]             = _cell("Other RES", "I", 8)
+    dsr_mask = _dsr_climate_year_mask(filepath, _dsr_col_count(filepath), climate_year)
     for _i, _col in enumerate(_dsr_cols(n_dsr)):
-        data[f"DSR{_i+1} (MW)"] = _cell("DSR", _col, 8)
+        data[f"DSR{_i+1} (MW)"] = _cell("DSR", _col, 8) if (_i >= len(dsr_mask) or dsr_mask[_i]) else 0.0
 
 
 def _read_storage_capacities(filepath: str, data: dict) -> None:
@@ -363,7 +403,8 @@ def _read_storage_capacities(filepath: str, data: dict) -> None:
 
 
 def _read_timeseries_capacities(filepath: str, data: dict, selected_hours: int,
-                                n_dsr: int = DSR_DEFAULT_COUNT) -> None:
+                                n_dsr: int = DSR_DEFAULT_COUNT,
+                                climate_year: int | None = None) -> None:
     """Populate *data* with hourly time-series export / profile columns.
 
     Reads all of a sheet's needed columns in a single call. Per-column reads on a
@@ -402,11 +443,15 @@ def _read_timeseries_capacities(filepath: str, data: dict, selected_hours: int,
     data["Exports_non_ENTSOe (MW/h)"] = -_one("Exchanges", "C", 28)
 
     # DSR: read only this zone's actual width (avoids costly out-of-range reads);
-    # pad any remaining DSR{i} columns up to n_dsr with zeros.
+    # pad any remaining DSR{i} columns up to n_dsr with zeros. Columns whose
+    # climate-year range excludes *climate_year* are zeroed too.
     _w = _dsr_col_count(filepath)
     dsr = _block("DSR", "C", get_column_letter(2 + _w), 15) if _w > 0 else pd.DataFrame()
+    dsr_mask = _dsr_climate_year_mask(filepath, _w, climate_year)
     for _i in range(n_dsr):
-        data[f"DSR{_i+1} (MW/h)"] = _assign(dsr, _i)
+        data[f"DSR{_i+1} (MW/h)"] = (
+            _assign(dsr, _i) if (_i >= len(dsr_mask) or dsr_mask[_i]) else _zeros()
+        )
 
     # Other RES: biomass/geothermal/marine/waste/unknown = columns E..I in one read.
     ores = _block("Other RES", "E", "I", 10)
@@ -418,6 +463,7 @@ def load_tech_characteristics(
     node_df: pd.DataFrame,
     selected_zones: list[str],
     scenario: int,
+    climate_year: int | None = None,
 ) -> pd.DataFrame:
     """Load technology characteristic data (outage rates, ramp rates, etc.).
 
@@ -429,6 +475,10 @@ def load_tech_characteristics(
         node_df (pd.DataFrame): Nodes table (used for zone iteration).
         selected_zones (list[str]): Zone codes to collect data for.
         scenario (int): Scenario year.
+        climate_year (int | None): Climate year to extract. Only DSR type
+            columns whose "Climate year start"/"Climate year end" range
+            includes *climate_year* (inclusive) are included, others are
+            zeroed. When ``None``, no DSR column is excluded.
 
     Returns:
         pd.DataFrame: One row per zone with columns defined by
@@ -436,7 +486,7 @@ def load_tech_characteristics(
 
     Example:
         >>> nodes = load_nodes()
-        >>> char_df = load_tech_characteristics(nodes, ["ES00"], 2030)
+        >>> char_df = load_tech_characteristics(nodes, ["ES00"], 2030, 2009)
         >>> "Ramp-Up Rate (MW/h)" in char_df.columns
         True
     """
@@ -449,7 +499,7 @@ def load_tech_characteristics(
             continue
         filepath = get_pemmdb_filepath(code, scenario)
         try:
-            data_char = _read_single_zone_characteristics(filepath, co2_col, code, n_dsr)
+            data_char = _read_single_zone_characteristics(filepath, co2_col, code, n_dsr, climate_year)
             tech_char_rows.append(data_char)
             print(f"Technology characteristics for {code}: OK")
         except FileNotFoundError:
@@ -459,7 +509,8 @@ def load_tech_characteristics(
 
 
 def _read_single_zone_characteristics(
-    filepath: str, co2_col: str, code: str, n_dsr: int = DSR_DEFAULT_COUNT
+    filepath: str, co2_col: str, code: str, n_dsr: int = DSR_DEFAULT_COUNT,
+    climate_year: int | None = None,
 ) -> dict:
     """Read all technology characteristic fields for one zone."""
     def _arr(col: str, row: int, nrows: int = 52) -> np.ndarray:
@@ -510,6 +561,7 @@ def _read_single_zone_characteristics(
     zeros26 = np.zeros(26)
     dc["Net maximum capacity - generation perspective (MW)"] = zeros26.copy()
     dc["Net maximum capacity - demand perspective (MW)"]     = zeros26.copy()
+    dc["Number of Hours (h)"] = zeros26.copy()
 
     # Other Non-RES1..27 (each successive column C..AC in the Other Non-RES sheet)
     for _col in _OTHER_NONRES_COLS:
@@ -521,17 +573,22 @@ def _read_single_zone_characteristics(
         dc["CO2 Factor (ton/MWh)"] = np.append(dc["CO2 Factor (ton/MWh)"], _cell(filepath, "Other Non-RES", _col, 14))
         dc["Net maximum capacity - generation perspective (MW)"] = np.append(dc["Net maximum capacity - generation perspective (MW)"], 0)
         dc["Net maximum capacity - demand perspective (MW)"]     = np.append(dc["Net maximum capacity - demand perspective (MW)"], 0)
+        dc["Number of Hours (h)"] = np.append(dc["Number of Hours (h)"], 0)
 
-    # DSR1..n_dsr (each successive column in the DSR sheet)
-    for _col in _dsr_cols(n_dsr):
+    # DSR1..n_dsr (each successive column in the DSR sheet); columns whose
+    # climate-year range excludes *climate_year* are excluded (zeroed).
+    dsr_mask = _dsr_climate_year_mask(filepath, _dsr_col_count(filepath), climate_year)
+    for _i, _col in enumerate(_dsr_cols(n_dsr)):
+        _included = _i >= len(dsr_mask) or dsr_mask[_i]
         for key in ("Fixed Generation Reduction (%)", "Ramp-Up Rate (MW/h)", "Ramp-Down Rate (MW/h)"):
             dc[key] = np.append(dc[key], 0)
-        dc["Number of Units"] = np.append(dc["Number of Units"], _cell(filepath, "DSR", _col, 9))
-        dc["Price (EUR/MWh)"] = np.append(dc["Price (EUR/MWh)"], _cell(filepath, "DSR", _col, 11))
+        dc["Number of Units"] = np.append(dc["Number of Units"], _cell(filepath, "DSR", _col, 9) if _included else 0)
+        dc["Price (EUR/MWh)"] = np.append(dc["Price (EUR/MWh)"], _cell(filepath, "DSR", _col, 11) if _included else 0)
         dc["Efficiency (%)"]  = np.append(dc["Efficiency (%)"], 0)
         dc["CO2 Factor (ton/MWh)"] = np.append(dc["CO2 Factor (ton/MWh)"], 0)
         dc["Net maximum capacity - generation perspective (MW)"] = np.append(dc["Net maximum capacity - generation perspective (MW)"], 0)
         dc["Net maximum capacity - demand perspective (MW)"]     = np.append(dc["Net maximum capacity - demand perspective (MW)"], 0)
+        dc["Number of Hours (h)"] = np.append(dc["Number of Hours (h)"], _cell(filepath, "DSR", _col, 10) if _included else 0)
 
     # Battery
     dc["Fixed Generation Reduction (%)"] = np.append(dc["Fixed Generation Reduction (%)"], 0)
@@ -543,6 +600,7 @@ def _read_single_zone_characteristics(
     dc["CO2 Factor (ton/MWh)"] = np.append(dc["CO2 Factor (ton/MWh)"], 0)
     dc["Net maximum capacity - generation perspective (MW)"] = np.append(dc["Net maximum capacity - generation perspective (MW)"], _cell(filepath, "Battery", "C", 11))
     dc["Net maximum capacity - demand perspective (MW)"]     = np.append(dc["Net maximum capacity - demand perspective (MW)"], _cell(filepath, "Battery", "D", 11))
+    dc["Number of Hours (h)"] = np.append(dc["Number of Hours (h)"], 0)
 
     # Electrolyser
     dc["Fixed Generation Reduction (%)"] = np.append(dc["Fixed Generation Reduction (%)"], _cell(filepath, "Electrolyser", "I", 11))
@@ -554,6 +612,7 @@ def _read_single_zone_characteristics(
     dc["CO2 Factor (ton/MWh)"] = np.append(dc["CO2 Factor (ton/MWh)"], 0)
     dc["Net maximum capacity - generation perspective (MW)"] = np.append(dc["Net maximum capacity - generation perspective (MW)"], 0)
     dc["Net maximum capacity - demand perspective (MW)"]     = np.append(dc["Net maximum capacity - demand perspective (MW)"], 0)
+    dc["Number of Hours (h)"] = np.append(dc["Number of Hours (h)"], 0)
 
     return dc
 

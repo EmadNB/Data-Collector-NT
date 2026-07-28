@@ -95,6 +95,7 @@ TECH_CHAR_COLUMNS = [
     "Ramp-Down Rate (MW/h)",
     "Fixed Generation Reduction (%)",
     "Maximum Number of Units in Maintenace",
+    "Number of Hours (h)",
     "Price (EUR/MWh)",
     "Efficiency (%)",
     "CO2 Factor (ton/MWh)",

@@ -233,6 +233,23 @@ def export_zone_data(
             break
 
     merged = merged.fillna(0)
+
+    # Solar rooftop fallback: most zones only publish an undifferentiated
+    # "Solar Profile" (no separate rooftop PECD file). When rooftop capacity is
+    # installed but its own profile is missing/all-zero, reuse the main solar
+    # profile so rooftop capacity isn't left with a zero output series.
+    if "Solar (rooftop) (MW)" in zone_df.columns and "Solar Profile" in merged.columns:
+        try:
+            _rooftop_cap = float(zone_df["Solar (rooftop) (MW)"].iloc[0])
+        except (TypeError, ValueError):
+            _rooftop_cap = 0.0
+        _rooftop_col = merged.get("Solar_Rooftop Profile")
+        _rooftop_missing = _rooftop_col is None or not (
+            pd.to_numeric(_rooftop_col, errors="coerce").fillna(0) != 0
+        ).any()
+        if _rooftop_cap > 0 and _rooftop_missing:
+            merged["Solar_Rooftop Profile"] = merged["Solar Profile"]
+
     if _single_dsr:
         merged = merged.rename(columns={"DSR1 (MW/h)": "DSR (MW/h)"})
     if _single_onr:

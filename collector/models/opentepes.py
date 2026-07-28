@@ -529,7 +529,7 @@ def _write_generation(
             # technical parameters
             "Efficiency": r.get("Efficiency", ""),  # blank = use LinearTerm as heat rate
             "ShiftTime": 0,
-            "EFOR":      r.get("EFOR", 0),
+            "EFOR":      r.get("EFOR", ""),
             # Ramp rates intentionally left blank (not modelled).
             "RampUp":    "",
             "RampDown":  "",
@@ -1418,8 +1418,6 @@ def export_opentepes(
             else:
                 must_run_flag = ""
 
-            efor = _get_char(tech_char_df, zone, "Annual Forced Outage (%)", char_idx, 0.0) / 100.0
-
             # Commodity fuel cost from TYNDP 2024 prices (EUR/MWh)
             if suffix in _SUFFIX_FUEL:
                 fuel_key = _SUFFIX_FUEL[suffix]
@@ -1443,7 +1441,7 @@ def export_opentepes(
                 "MaximumStorage": round(max_storage / 1000.0, 6) if max_storage > 0 else "",
                 "MinimumStorage": "",
                 "StorageType":  "",
-                "EFOR":         round(efor, 4),
+                "EFOR":         "",
                 "RampUp":       round(ramp_up, 2) if ramp_up > 0 else "",
                 "RampDown":     round(ramp_dn, 2) if ramp_dn > 0 else "",
                 "FuelCost":     round(fuel_cost, 2) if is_dsr_onr else commodity_fuel,

@@ -12,12 +12,13 @@ import pandas as pd
 # Other Non-RES has up to 27 type columns (C..AC) on its PEMMDB sheet.
 _OTHER_NONRES_COLS = [get_column_letter(3 + i) for i in range(27)]
 
-# Row-index permutation mapping the source sheets' thermal-technology order
-# onto the canonical TECH_COLUMNS order. Both the "CO2 emission factor" sheet
-# and the "Common Data" sheet place Gas (ccgt_pre1)/(ccgt_pre2) right after
-# ccgt_old2 (source rows 13, 14); everywhere else (TECH_COLUMNS) they appear
-# after Oil shale (new), just before Hydrogen.
-_THERMAL_ROW_ORDER = list(range(13)) + list(range(15, 24)) + [13, 14] + list(range(24, 26))
+# Row-index permutation mapping the "Thermal" sheet's physical thermal-
+# technology row order onto the canonical TECH_COLUMNS order, which places Gas
+# (ccgt_pre1)/(ccgt_pre2) right after Gas (ccgt_old2) (source rows 22, 23 on
+# the "Thermal" sheet). The "CO2 emission factor" and "Common Data" sheets
+# already place ccgt_pre1/pre2 right after ccgt_old2, matching the canonical
+# order, so they need no permutation.
+_THERMAL_SHEET_ROW_ORDER = list(range(13)) + [22, 23] + list(range(13, 22)) + list(range(24, 26))
 
 
 @lru_cache(maxsize=16)
@@ -525,38 +526,45 @@ def _read_single_zone_characteristics(
     def _cell(filepath_: str, sheet: str, col: str, row: int) -> object:
         return _read_scalar(filepath_, sheet, col, row)
 
+    def _reorder(arr: np.ndarray) -> np.ndarray:
+        # Only reorder a full 26-row thermal block; leave incomplete/malformed
+        # sheets (some countries' "Thermal" sheets are shorter) as-is.
+        return arr[_THERMAL_SHEET_ROW_ORDER] if len(arr) == 26 else arr
+
     dc: dict = {"Code": code}
 
-    raw = _arr("D", 11); dc["Number of Units"]                  = raw[~np.isnan(raw.astype(float))]
-    raw = _arr("E", 11); dc["Number of Biofuel Units"]          = raw[~np.isnan(raw.astype(float))]
-    raw = _arr("F", 11); dc["Biofuel Usage (%)"]                = raw[~np.isnan(raw.astype(float))]
+    raw = _arr("D", 11); dc["Number of Units"]                  = _reorder(raw[~np.isnan(raw.astype(float))])
+    raw = _arr("E", 11); dc["Number of Biofuel Units"]          = _reorder(raw[~np.isnan(raw.astype(float))])
+    raw = _arr("F", 11); dc["Biofuel Usage (%)"]                = _reorder(raw[~np.isnan(raw.astype(float))])
     raw = _arr("H:S", 11)
-    dc["Must Run (Number of units)"] = raw[::2]
-    dc["Must Run (%)"]               = raw[1::2]
-    raw = _arr("AG", 11); dc["Annual Forced Outage (%)"]        = raw[~np.isnan(raw.astype(float))]
-    raw = _arr("AH", 11); dc["Annual Forced Outage (Days)"]     = raw[~np.isnan(raw.astype(float))]
-    raw = _arr("AI", 11); dc["Annual Forced Outage in Winter (%)"] = raw[~np.isnan(raw.astype(float))]
-    raw = _arr("AJ", 11); dc["Minimum Stable Power (%)"]        = raw[~np.isnan(raw.astype(float))]
-    raw = _arr("AK", 11); dc["Ramp-Up Rate (MW/h)"]             = raw[~np.isnan(raw.astype(float))]
-    raw = _arr("AL", 11); dc["Ramp-Down Rate (MW/h)"]           = raw[~np.isnan(raw.astype(float))]
-    raw = _arr("AM", 11); dc["Fixed Generation Reduction (%)"]  = raw[~np.isnan(raw.astype(float))]
-    raw = _arr("AP", 11); dc["Maximum Number of Units in Maintenace"] = raw[~np.isnan(raw.astype(float))]
+    dc["Must Run (Number of units)"] = _reorder(raw[::2])
+    dc["Must Run (%)"]               = _reorder(raw[1::2])
+    raw = _arr("AG", 11); dc["Annual Forced Outage (%)"]        = _reorder(raw[~np.isnan(raw.astype(float))])
+    raw = _arr("AH", 11); dc["Annual Forced Outage (Days)"]     = _reorder(raw[~np.isnan(raw.astype(float))])
+    raw = _arr("AI", 11); dc["Annual Forced Outage in Winter (%)"] = _reorder(raw[~np.isnan(raw.astype(float))])
+    raw = _arr("AJ", 11); dc["Minimum Stable Power (%)"]        = _reorder(raw[~np.isnan(raw.astype(float))])
+    raw = _arr("AK", 11); dc["Ramp-Up Rate (MW/h)"]             = _reorder(raw[~np.isnan(raw.astype(float))])
+    raw = _arr("AL", 11); dc["Ramp-Down Rate (MW/h)"]           = _reorder(raw[~np.isnan(raw.astype(float))])
+    raw = _arr("AM", 11); dc["Fixed Generation Reduction (%)"]  = _reorder(raw[~np.isnan(raw.astype(float))])
+    raw = _arr("AP", 11); dc["Maximum Number of Units in Maintenace"] = _reorder(raw[~np.isnan(raw.astype(float))])
 
+    # "CO2 emission factor" and "Common Data" already list ccgt_pre1/pre2 right
+    # after ccgt_old2, matching the canonical order, so no reorder is needed.
     co2_raw = pd.read_excel(
         _excel(FILEPATH_CO2_FACTORS), sheet_name="CO2 emission factor",
         usecols=co2_col, header=None, skiprows=4, nrows=26,
     ).to_numpy()
-    dc["CO2 Factor (ton/MWh)"] = co2_raw[_THERMAL_ROW_ORDER] * 0.0036
+    dc["CO2 Factor (ton/MWh)"] = co2_raw * 0.0036
     eff_raw = pd.read_excel(
         _excel(FILEPATH_COMMON_DATA), sheet_name="Common Data", usecols="F",
         header=None, skiprows=14, nrows=26,
     ).to_numpy()
-    dc["Efficiency (%)"] = eff_raw[_THERMAL_ROW_ORDER]
+    dc["Efficiency (%)"] = eff_raw
     price_raw = pd.read_excel(
         _excel(FILEPATH_COMMON_DATA), sheet_name="Common Data", usecols="H",
         header=None, skiprows=14, nrows=26,
     ).to_numpy()
-    dc["Price (EUR/MWh)"] = price_raw[_THERMAL_ROW_ORDER]
+    dc["Price (EUR/MWh)"] = price_raw
 
     zeros26 = np.zeros(26)
     dc["Net maximum capacity - generation perspective (MW)"] = zeros26.copy()

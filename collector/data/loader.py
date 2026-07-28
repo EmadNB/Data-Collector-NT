@@ -12,6 +12,13 @@ import pandas as pd
 # Other Non-RES has up to 27 type columns (C..AC) on its PEMMDB sheet.
 _OTHER_NONRES_COLS = [get_column_letter(3 + i) for i in range(27)]
 
+# Row-index permutation mapping the source sheets' thermal-technology order
+# onto the canonical TECH_COLUMNS order. Both the "CO2 emission factor" sheet
+# and the "Common Data" sheet place Gas (ccgt_pre1)/(ccgt_pre2) right after
+# ccgt_old2 (source rows 13, 14); everywhere else (TECH_COLUMNS) they appear
+# after Oil shale (new), just before Hydrogen.
+_THERMAL_ROW_ORDER = list(range(13)) + list(range(15, 24)) + [13, 14] + list(range(24, 26))
+
 
 @lru_cache(maxsize=16)
 def _excel(path: str) -> pd.ExcelFile:
@@ -484,18 +491,21 @@ def _read_single_zone_characteristics(
     raw = _arr("AM", 11); dc["Fixed Generation Reduction (%)"]  = raw[~np.isnan(raw.astype(float))]
     raw = _arr("AP", 11); dc["Maximum Number of Units in Maintenace"] = raw[~np.isnan(raw.astype(float))]
 
-    dc["CO2 Factor (ton/MWh)"] = (
-        pd.read_excel(_excel(FILEPATH_CO2_FACTORS), sheet_name="CO2 emission factor",
-                      usecols=co2_col, header=None, skiprows=4, nrows=26).to_numpy() * 0.0036
-    )
-    dc["Efficiency (%)"] = pd.read_excel(
+    co2_raw = pd.read_excel(
+        _excel(FILEPATH_CO2_FACTORS), sheet_name="CO2 emission factor",
+        usecols=co2_col, header=None, skiprows=4, nrows=26,
+    ).to_numpy()
+    dc["CO2 Factor (ton/MWh)"] = co2_raw[_THERMAL_ROW_ORDER] * 0.0036
+    eff_raw = pd.read_excel(
         _excel(FILEPATH_COMMON_DATA), sheet_name="Common Data", usecols="F",
         header=None, skiprows=14, nrows=26,
     ).to_numpy()
-    dc["Price (EUR/MWh)"] = pd.read_excel(
+    dc["Efficiency (%)"] = eff_raw[_THERMAL_ROW_ORDER]
+    price_raw = pd.read_excel(
         _excel(FILEPATH_COMMON_DATA), sheet_name="Common Data", usecols="H",
         header=None, skiprows=14, nrows=26,
     ).to_numpy()
+    dc["Price (EUR/MWh)"] = price_raw[_THERMAL_ROW_ORDER]
 
     zeros26 = np.zeros(26)
     dc["Net maximum capacity - generation perspective (MW)"] = zeros26.copy()

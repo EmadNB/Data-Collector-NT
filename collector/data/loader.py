@@ -566,6 +566,30 @@ def _read_single_zone_characteristics(
     ).to_numpy()
     dc["Price (EUR/MWh)"] = price_raw
 
+    # Minimum up/down time and warm-start fuel consumption / fix cost. Same
+    # zone-independent reference table as Efficiency/Price above; used by
+    # core.py to derive Start-up Cost from each zone's commodity fuel price.
+    minup_raw = pd.read_excel(
+        _excel(FILEPATH_COMMON_DATA), sheet_name="Common Data", usecols="I",
+        header=None, skiprows=14, nrows=26,
+    ).to_numpy()
+    dc["Minimum Up Time (h)"] = minup_raw
+    mindown_raw = pd.read_excel(
+        _excel(FILEPATH_COMMON_DATA), sheet_name="Common Data", usecols="J",
+        header=None, skiprows=14, nrows=26,
+    ).to_numpy()
+    dc["Minimum Down Time (h)"] = mindown_raw
+    sufuel_raw = pd.read_excel(
+        _excel(FILEPATH_COMMON_DATA), sheet_name="Common Data", usecols="K",
+        header=None, skiprows=14, nrows=26,
+    ).to_numpy()
+    dc["Start-up Fuel Consumption (GJ/MW)"] = sufuel_raw
+    sucost_raw = pd.read_excel(
+        _excel(FILEPATH_COMMON_DATA), sheet_name="Common Data", usecols="L",
+        header=None, skiprows=14, nrows=26,
+    ).to_numpy()
+    dc["Start-up Fix Cost (EUR/MW)"] = sucost_raw
+
     zeros26 = np.zeros(26)
     dc["Net maximum capacity - generation perspective (MW)"] = zeros26.copy()
     dc["Net maximum capacity - demand perspective (MW)"]     = zeros26.copy()
@@ -582,6 +606,9 @@ def _read_single_zone_characteristics(
         dc["Net maximum capacity - generation perspective (MW)"] = np.append(dc["Net maximum capacity - generation perspective (MW)"], 0)
         dc["Net maximum capacity - demand perspective (MW)"]     = np.append(dc["Net maximum capacity - demand perspective (MW)"], 0)
         dc["Number of Hours (h)"] = np.append(dc["Number of Hours (h)"], 0)
+        for key in ("Minimum Up Time (h)", "Minimum Down Time (h)",
+                    "Start-up Fuel Consumption (GJ/MW)", "Start-up Fix Cost (EUR/MW)"):
+            dc[key] = np.append(dc[key], 0)
 
     # DSR1..n_dsr (each successive column in the DSR sheet); columns whose
     # climate-year range excludes *climate_year* are excluded (zeroed).
@@ -597,6 +624,9 @@ def _read_single_zone_characteristics(
         dc["Net maximum capacity - generation perspective (MW)"] = np.append(dc["Net maximum capacity - generation perspective (MW)"], 0)
         dc["Net maximum capacity - demand perspective (MW)"]     = np.append(dc["Net maximum capacity - demand perspective (MW)"], 0)
         dc["Number of Hours (h)"] = np.append(dc["Number of Hours (h)"], _cell(filepath, "DSR", _col, 10) if _included else 0)
+        for key in ("Minimum Up Time (h)", "Minimum Down Time (h)",
+                    "Start-up Fuel Consumption (GJ/MW)", "Start-up Fix Cost (EUR/MW)"):
+            dc[key] = np.append(dc[key], 0)
 
     # Battery
     dc["Fixed Generation Reduction (%)"] = np.append(dc["Fixed Generation Reduction (%)"], 0)
@@ -609,6 +639,9 @@ def _read_single_zone_characteristics(
     dc["Net maximum capacity - generation perspective (MW)"] = np.append(dc["Net maximum capacity - generation perspective (MW)"], _cell(filepath, "Battery", "C", 11))
     dc["Net maximum capacity - demand perspective (MW)"]     = np.append(dc["Net maximum capacity - demand perspective (MW)"], _cell(filepath, "Battery", "D", 11))
     dc["Number of Hours (h)"] = np.append(dc["Number of Hours (h)"], 0)
+    for key in ("Minimum Up Time (h)", "Minimum Down Time (h)",
+                "Start-up Fuel Consumption (GJ/MW)", "Start-up Fix Cost (EUR/MW)"):
+        dc[key] = np.append(dc[key], 0)
 
     # Electrolyser
     dc["Fixed Generation Reduction (%)"] = np.append(dc["Fixed Generation Reduction (%)"], _cell(filepath, "Electrolyser", "I", 11))
@@ -621,6 +654,9 @@ def _read_single_zone_characteristics(
     dc["Net maximum capacity - generation perspective (MW)"] = np.append(dc["Net maximum capacity - generation perspective (MW)"], 0)
     dc["Net maximum capacity - demand perspective (MW)"]     = np.append(dc["Net maximum capacity - demand perspective (MW)"], 0)
     dc["Number of Hours (h)"] = np.append(dc["Number of Hours (h)"], 0)
+    for key in ("Minimum Up Time (h)", "Minimum Down Time (h)",
+                "Start-up Fuel Consumption (GJ/MW)", "Start-up Fix Cost (EUR/MW)"):
+        dc[key] = np.append(dc[key], 0)
 
     return dc
 

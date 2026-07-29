@@ -314,6 +314,24 @@ def export_zone_data(
                 commodity_prices.get(fuel_key, 0.0) if fuel_key else 0.0
             )
 
+    # Start-up Cost = fix cost (wear) + warm-start fuel consumption (Net
+    # GJ/MW.start -> MWh via /3.6) x the zone's commodity fuel price. Replaces
+    # the two raw intermediate columns with a single combined figure.
+    if not tech_char_excel.empty:
+        def _numeric_col(name: str) -> pd.Series:
+            if name in tech_char_excel.columns:
+                return pd.to_numeric(tech_char_excel[name], errors="coerce").fillna(0)
+            return pd.Series(0.0, index=tech_char_excel.index)
+
+        fix_cost   = _numeric_col("Start-up Fix Cost (EUR/MW)")
+        fuel_cons  = _numeric_col("Start-up Fuel Consumption (GJ/MW)")
+        fuel_price = _numeric_col("Fuel (EUR/MWh)")
+        tech_char_excel["Start-Up Cost (EUR)"] = fix_cost + fuel_cons / 3.6 * fuel_price
+        tech_char_excel = tech_char_excel.drop(
+            columns=["Start-up Fuel Consumption (GJ/MW)", "Start-up Fix Cost (EUR/MW)"],
+            errors="ignore",
+        )
+
     # Gas & Hydrogen assets
     assets_df = _build_assets_df(zone_name, storage_df, terminal_df)
 

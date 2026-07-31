@@ -234,21 +234,36 @@ def export_zone_data(
 
     merged = merged.fillna(0)
 
-    # Solar rooftop fallback: most zones only publish an undifferentiated
-    # "Solar Profile" (no separate rooftop PECD file). When rooftop capacity is
-    # installed but its own profile is missing/all-zero, reuse the main solar
-    # profile so rooftop capacity isn't left with a zero output series.
-    if "Solar (rooftop) (MW)" in zone_df.columns and "Solar Profile" in merged.columns:
+    # Solar fallback: when a solar/CSP type has capacity but its own profile is
+    # missing/all-zero, reuse a paired solar profile (already loaded for the
+    # same zone & period) instead of leaving that capacity with zero output.
+    # Mirrors the fallback used in the openTEPES export path (opentepes.py's
+    # _SOLAR_FALLBACK). Processed in this order so a fixed-up "Solar Profile"
+    # is available for the rooftop fallback that follows it.
+    _SOLAR_FALLBACK_PAIRS = [
+        ("Solar (MW)",                        "Solar Profile",             "Solar_Utility Profile"),
+        ("Solar (rooftop) (MW)",              "Solar_Rooftop Profile",     "Solar Profile"),
+        ("Solar (thermal) (MW)",              "CSP_noStorage Profile",     "CSP_withStorage_D Profile"),
+        ("Solar (thermal_with_storage) (MW)", "CSP_withStorage_D Profile", "CSP_noStorage Profile"),
+    ]
+    for _cap_col, _primary_col, _fallback_col in _SOLAR_FALLBACK_PAIRS:
+        if _cap_col not in zone_df.columns:
+            continue
         try:
-            _rooftop_cap = float(zone_df["Solar (rooftop) (MW)"].iloc[0])
+            _cap = float(zone_df[_cap_col].iloc[0])
         except (TypeError, ValueError):
-            _rooftop_cap = 0.0
-        _rooftop_col = merged.get("Solar_Rooftop Profile")
-        _rooftop_missing = _rooftop_col is None or not (
-            pd.to_numeric(_rooftop_col, errors="coerce").fillna(0) != 0
+            _cap = 0.0
+        if _cap <= 0:
+            continue
+        _primary = merged.get(_primary_col)
+        _primary_missing = _primary is None or not (
+            pd.to_numeric(_primary, errors="coerce").fillna(0) != 0
         ).any()
-        if _rooftop_cap > 0 and _rooftop_missing:
-            merged["Solar_Rooftop Profile"] = merged["Solar Profile"]
+        if not _primary_missing:
+            continue
+        _fallback = merged.get(_fallback_col)
+        if _fallback is not None and (pd.to_numeric(_fallback, errors="coerce").fillna(0) != 0).any():
+            merged[_primary_col] = _fallback
 
     if _single_dsr:
         merged = merged.rename(columns={"DSR1 (MW/h)": "DSR (MW/h)"})

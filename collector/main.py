@@ -26,6 +26,8 @@ from __future__ import annotations
 
 import os
 
+import numpy as np
+
 from collector.data.loader import (
     clear_excel_cache,
     load_all_profiles,
@@ -39,6 +41,7 @@ from collector.data.loader import (
     load_nodes,
     load_plexos_h2_demand_profiles,
     load_plexos_line_max_flows,
+    load_plexos_wind_offshore_cf,
     load_reserve_requirements,
     load_tech_capacities,
     load_tech_characteristics,
@@ -277,6 +280,34 @@ def _pipeline(
             profiles_df["Hydrogen Demand Profile"] = plexos_h2["Hydrogen Demand Profile"]
         except FileNotFoundError as exc:
             print(f"Warning: PLEXOS result file not found, skipping H2 demand correction – {exc}")
+
+    # Data correction: derive offshore wind hourly capacity factor from PLEXOS
+    # results (Wind Offshore generation / installed capacity) instead of the
+    # PECD profile, for any zone with installed offshore wind capacity whose
+    # PECD-derived profile came back all zero (missing file, edition-name
+    # mismatch, etc.). Detected dynamically each run — no fixed zone list —
+    # since which zones/years are affected varies (e.g. a PECD file missing
+    # for one scenario year can be present for another).
+    if data_correction:
+        wind_offshore = profiles_df.setdefault("Wind_Offshore Profile", [])
+        wind_offshore_by_zone = {e["Code"]: e for e in wind_offshore}
+        offshore_cap_by_zone = dict(zip(tech_cap_df["Code"], tech_cap_df["Wind (offshore) (MW)"]))
+        needs_fix = [
+            z for z in zones
+            if offshore_cap_by_zone.get(z, 0) > 0
+            and not np.any(np.asarray(wind_offshore_by_zone.get(z, {}).get("Data", []), dtype=float))
+        ]
+        if needs_fix:
+            print(f"\n=== Data correction: {', '.join(needs_fix)} have offshore wind capacity but a zero PECD profile — overriding from PLEXOS results ===")
+            try:
+                plexos_wind = load_plexos_wind_offshore_cf(tech_cap_df, scenario, hours, needs_fix)
+                fixed = {e["Code"] for e in plexos_wind["Wind_Offshore Profile"]}
+                wind_offshore[:] = [e for e in wind_offshore if e["Code"] not in fixed] + plexos_wind["Wind_Offshore Profile"]
+                unfixed = [z for z in needs_fix if z not in fixed]
+                if unfixed:
+                    print(f"Warning: no PLEXOS Wind Offshore column for {', '.join(unfixed)} – left as zero")
+            except FileNotFoundError as exc:
+                print(f"Warning: PLEXOS result file not found, skipping offshore wind CF correction – {exc}")
 
     # Load TYNDP 2024 commodity prices and Lignite country groups
     commodity_prices = load_commodity_prices(scenario)

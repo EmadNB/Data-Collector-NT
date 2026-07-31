@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import glob
+import os
 import re
 import openpyxl
 from openpyxl.utils import get_column_letter
@@ -1108,6 +1110,58 @@ def load_plexos_h2_demand_profiles(
     return {"Hydrogen Demand Profile": results}
 
 
+def load_plexos_wind_offshore_cf(
+    tech_cap_df: pd.DataFrame,
+    scenario: int,
+    selected_hours: int,
+    zones: list[str],
+) -> dict[str, list[dict]]:
+    """Offshore wind hourly capacity factor derived from PLEXOS results.
+
+    Used by the "Data Correction" option to replace the PECD ``Wind_Offshore
+    Profile`` for zones (e.g. ``BEOF``) whose market-model dispatch is
+    preferred over the input profile: divides the PLEXOS ``Wind Offshore
+    [MW]`` generation by the zone's installed offshore wind capacity.
+
+    Args:
+        tech_cap_df (pd.DataFrame): Technology capacity table with ``Code``
+            and ``Wind (offshore) (MW)`` columns.
+        scenario (int): Scenario year.
+        selected_hours (int): Number of hourly values to read.
+        zones (list[str]): Zone codes to compute (e.g. ``["BEOF"]``).
+
+    Returns:
+        dict[str, list[dict]]: ``{"Wind_Offshore Profile": [...]}`` with one
+        entry per zone in *zones* found in the PLEXOS sheet. Zones with zero
+        or missing installed capacity get an all-zero profile.
+    """
+    filepath = f"inputs/MMStandardOutputFile_NT{scenario}_Plexos_CY2009_2.5_v40.xlsx"
+    wb = openpyxl.load_workbook(filepath, data_only=True, read_only=True)
+    ws = wb["Hourly Market Data"]
+    rows = list(ws.iter_rows(values_only=True))
+    cat, ctry = rows[10], rows[11]           # row 11 category, row 12 country
+    gen_col: dict[str, int] = {}
+    for c in range(2, len(cat)):
+        if cat[c] and str(cat[c]).strip() == "Wind Offshore [MW]" and ctry[c] in zones:
+            gen_col[str(ctry[c])] = c
+    series: dict[str, np.ndarray] = {z: np.zeros(selected_hours) for z in gen_col}
+    for i, rw in enumerate(rows[13:13 + selected_hours]):   # data from row 14
+        for z, c in gen_col.items():
+            v = rw[c]
+            if isinstance(v, (int, float)):
+                series[z][i] = v
+    wb.close()
+
+    cap_by_zone = dict(zip(tech_cap_df["Code"], tech_cap_df["Wind (offshore) (MW)"]))
+
+    results: list[dict] = []
+    for z, gen in series.items():
+        cap = cap_by_zone.get(z, 0.0)
+        cf = gen / cap if cap else np.zeros(selected_hours)
+        results.append({"Code": z, "Year": None, "Data": np.asarray(cf, dtype=float)})
+    return {"Wind_Offshore Profile": results}
+
+
 # ---------------------------------------------------------------------------
 # Demand profile loaders
 # ---------------------------------------------------------------------------
@@ -1328,6 +1382,20 @@ def _load_excel_demand_profile(
 # ---------------------------------------------------------------------------
 
 
+def _resolve_pecd_path(file_template: str, code: str) -> str | None:
+    """Resolve a PECD CSV path for *code*, tolerating an edition-label
+    mismatch (e.g. a file published as ``edition 2023.3`` while the rest of
+    the dataset uses ``edition 2023.2``). Falls back to a glob search over
+    the edition segment when the exact templated path doesn't exist.
+    """
+    exact = file_template.format(code)
+    if os.path.exists(exact):
+        return exact
+    pattern = re.sub(r"edition [\d.]+\.csv$", "edition *.csv", exact)
+    matches = glob.glob(pattern)
+    return matches[0] if matches else None
+
+
 def _load_pecd_csv_profiles(
     node_df: pd.DataFrame,
     selected_zones: list[str],
@@ -1375,13 +1443,12 @@ def _load_pecd_csv_profiles(
     for code in node_df["Code"]:
         if code not in selected_zones:
             continue
-        path = file_template.format(code)
-        try:
-            df = pd.read_csv(path, header=0)
-        except FileNotFoundError:
+        path = _resolve_pecd_path(file_template, code)
+        if path is None:
             print(f"{profile_key} for {code}: file not found – zeros used")
             results.append({"Code": code, "Year": 0, "Data": np.zeros(target_len)})
             continue
+        df = pd.read_csv(path, header=0)
 
         col_idx = None
         if df.shape[0] > year_row_idx:

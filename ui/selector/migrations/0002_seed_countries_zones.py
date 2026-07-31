@@ -112,8 +112,6 @@ def seed(apps, schema_editor):
         ("NON1", "Norway"),
         ("NOS0", "Norway"),
         ("PL00", "Poland"),
-        ("PL00E", "Poland"),
-        ("PL00I", "Poland"),
         ("PS00", "Palestine"),
         ("PT00", "Portugal"),
         ("RO00", "Romania"),

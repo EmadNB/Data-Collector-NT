@@ -1,5 +1,3 @@
-"""Visualisation sub-package: Bokeh charts and Folium network maps."""
-
 from collector.visualization.plots import (
     plot_availability_report,
     plot_capacity_by_technology,

@@ -71,7 +71,4 @@ ALLOWED_HOSTS = [
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
-# Absolute path to the root of the collector project (contains Data/ folder)
 COLLECTOR_BASE_PATH = str(BASE_DIR.parent / "collector")
-
-

@@ -56,7 +56,6 @@ def forwards(apps, schema_editor):
     Country = apps.get_model("selector", "Country")
     Zone = apps.get_model("selector", "Zone")
 
-    # 1) If someone changed iso3 to 2-letter codes, fix back to ISO3 (GeoJSON uses ISO3).
     for c in Country.objects.all():
         if isinstance(c.iso3, str) and len(c.iso3) == 2:
             iso3 = NAME_TO_ISO3.get(c.name)
@@ -64,7 +63,6 @@ def forwards(apps, schema_editor):
                 c.iso3 = iso3
                 c.save(update_fields=["iso3"])
 
-    # 2) Populate iso2 using zone code prefixes (matches your zone naming: FR00 -> FR, UK00 -> UK, etc.)
     for c in Country.objects.all():
         if c.iso2:
             continue
@@ -92,4 +90,3 @@ class Migration(migrations.Migration):
     operations = [
         migrations.RunPython(forwards, reverse_code=backwards),
     ]
-

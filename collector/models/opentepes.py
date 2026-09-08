@@ -1,12 +1,4 @@
-﻿"""Export pipeline data to openTEPES CSV input format.
-
-One call to :func:`export_opentepes` produces the complete set of
-``oT_Data_*`` and ``oT_Dict_*`` CSV files expected by openTEPES, placed
-inside *output_folder*.  The mapping follows the 2-node reference model
-found in ``opentepes/2n/inputs/``.
-"""
-
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import os
 import re
@@ -18,42 +10,22 @@ import pandas as pd
 
 
 def _clean_area(name: object) -> str:
-    """Normalise an area/location name to a plain-ASCII, underscore token.
-
-    Node locations can contain non-breaking spaces (U+00A0) and accented
-    characters that get mojibaked on CSV round-trips, causing openTEPES to fail
-    matching the same area across its input files. This strips those to ASCII.
-    """
     s = str(name).replace("\xa0", " ")
     s = unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode("ascii")
     s = re.sub(r"\s+", "_", s.strip())
     return re.sub(r"_+", "_", s).strip("_")
 
 
-# ---------------------------------------------------------------------------
 # Technology table
-# ---------------------------------------------------------------------------
-# (capacity_col, generator_suffix, opentepes_technology, is_RES, char_row_idx)
-# char_row_idx: 0-based index into the tech-characteristic arrays stored in
-# tech_char_df for thermal units; None for RES / hydro / other.
 
 def _tech_label(cap_col: str) -> str:
-    """Convert a TECH_COLUMNS name to a clean snake_case label.
-
-    'Hard Coal (old1) (MW)' -> 'Hard_Coal_old1'
-    'Battery (MWh)'         -> 'Battery'
-    'Gas (ccgt_old1) (MW)'  -> 'Gas_ccgt_old1'
-    """
-    s = re.sub(r'\s*\([A-Za-z/]+\)\s*$', '', cap_col)  # strip trailing unit
-    s = re.sub(r'[()]', '', s)                           # remove remaining parens
-    s = re.sub(r'[\s\-]+', '_', s.strip())              # spaces/hyphens -> _
+    s = re.sub(r'\s*\([A-Za-z/]+\)\s*$', '', cap_col)
+    s = re.sub(r'[()]', '', s)
+    s = re.sub(r'[\s\-]+', '_', s.strip())
     s = re.sub(r'_+', '_', s).strip('_')
-    return s.replace('_turbine', '')                     # Hydro_open_ps_turbine -> Hydro_open_ps
+    return s.replace('_turbine', '')
 
 
-# For techs where max_power (and max_charge) come from tech_char_df rather than
-# tech_cap_df (e.g. Battery where the cap_col stores MWh, not MW):
-# cap_col -> (char_col_for_max_p, char_col_for_max_charge, char_idx)
 _CHAR_POWER_COLS: dict[str, tuple[str, str]] = {
     "Battery (MWh)": (
         "Net maximum capacity - generation perspective (MW)",
@@ -61,19 +33,15 @@ _CHAR_POWER_COLS: dict[str, tuple[str, str]] = {
     ),
 }
 
-# Number of Other Non-RES type columns (uniform across all zones' PEMMDB sheets).
 _NORES_COUNT = 27
 
 
 def _battery_char_idx(n_dsr: int) -> int:
-    """Battery's index in the tech-characteristic arrays: after thermal(26) +
-    Other Non-RES(27) + DSR(n_dsr)."""
     return 26 + _NORES_COUNT + n_dsr
 
 
-# Thermal entries occupy fixed char-array positions 0..25.
 _THERMAL_ENTRIES: list[tuple[str, str, str, bool, int | None]] = [
-    # â"€â"€ Thermal / conventional â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+    # Thermal / conventional
     ("Nuclear (MW)",           "Nuclear",      "Nuclear",      False,  0),
     ("Hard Coal (old1) (MW)",  "Coal_old1",    "Coal",         False,  1),
     ("Hard Coal (old2) (MW)",  "Coal_old2",    "Coal",         False,  2),
@@ -102,9 +70,8 @@ _THERMAL_ENTRIES: list[tuple[str, str, str, bool, int | None]] = [
     ("Hydrogen (ccgt) (MW)",   "H2_ccgt",      "Hydrogen",     False, 25),
 ]
 
-# RES / hydro / other-RES entries (char_idx is None — no thermal-style chars).
 _RES_ENTRIES: list[tuple[str, str, str, bool, int | None]] = [
-    # â"€â"€ RES â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+    # RES
     ("Wind (onshore) (MW)",    "WindOn",       "Wind",         True,  None),
     ("Wind (offshore) (MW)",   "WindOff",      "Wind",         True,  None),
     ("Solar (MW)",             "Solar",        "Solar",        True,  None),
@@ -112,12 +79,12 @@ _RES_ENTRIES: list[tuple[str, str, str, bool, int | None]] = [
     ("Solar (thermal) (MW)",   "SolarCSP",     "Solar",        True,  None),
     ("Solar (thermal_with_storage) (MW)", "SolarCSP_S", "Solar", True, None),
     ("Hydro (river) (MW)",     "HydroRoR",     "Hydro",        True,  None),
-    # â"€â"€ Hydro with storage â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+    # Hydro with storage
     ("Hydro (pondage) (MW)",         "HydroPond",   "Hydro", False, None),
     ("Hydro (reservoir) (MW)",       "HydroRes",    "Hydro", False, None),
     ("Hydro (open_ps_turbine) (MW)", "HydroPS_o",   "Hydro", False, None),
     ("Hydro (closed_ps_turbine) (MW)", "HydroPS_c", "Hydro", False, None),
-    # â"€â"€ Other RES â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+    # Other RES
     ("Other RES (biomass) (MW)",    "Biomass",  "Biomass",    False, None),
     ("Other RES (geothermal) (MW)", "Geo",      "Geothermal", True,  None),
     ("Other RES (marine) (MW)",     "Marine",   "Marine",     True,  None),
@@ -127,11 +94,6 @@ _RES_ENTRIES: list[tuple[str, str, str, bool, int | None]] = [
 
 
 def _build_tech_entries(n_dsr: int) -> list[tuple[str, str, str, bool, int | None]]:
-    """Assemble the technology table for *n_dsr* DSR types.
-
-    char_idx layout: thermal 0-25, Other Non-RES 26-52, DSR 53.., then Battery
-    and Electrolyser after the DSR block, and the char-less RES/hydro entries.
-    """
     return [
         *_THERMAL_ENTRIES,
         *[(f"Other Non-RES{i+1} (MW)", f"OtherNonRES{i+1}", "Other", False, 26 + i)
@@ -143,7 +105,6 @@ def _build_tech_entries(n_dsr: int) -> list[tuple[str, str, str, bool, int | Non
         *_RES_ENTRIES,
     ]
 
-# Storage MW columns (turbine side already in _TECH_ENTRIES; here are MWh caps)
 _STORAGE_MW_PAIRS: dict[str, str] = {
     "Hydro (pondage) (MW)":         "Hydro (pondage) (MWh)",
     "Hydro (reservoir) (MW)":       "Hydro (reservoir) (MWh)",
@@ -156,7 +117,6 @@ _PUMP_PAIRS: dict[str, str] = {
     "Hydro (closed_ps_turbine) (MW)": "Hydro (closed_ps_pump) (MW)",
 }
 
-# openTEPES technology -> commodity price key
 _OT_TECH_FUEL: dict[str, str] = {
     "Nuclear":  "Nuclear",
     "Coal":     "Hard_coal",
@@ -164,7 +124,6 @@ _OT_TECH_FUEL: dict[str, str] = {
     "Hydrogen": "Hydrogen",
     "Biomass":  "Biomethane",
 }
-# generator suffix overrides for Oil sub-types
 _SUFFIX_FUEL: dict[str, str] = {
     "Oil_light":  "Light_oil",
     "Oil_heavy1": "Heavy_oil",
@@ -173,7 +132,6 @@ _SUFFIX_FUEL: dict[str, str] = {
     "OilShale2":  "Oil_shale",
 }
 
-# Profile type â†’ generator suffix (which RES generators get a variable profile)
 _PROFILE_TO_SUFFIX: dict[str, str] = {
     "Wind_Onshore Profile":        "WindOn",
     "Wind_Offshore Profile":       "WindOff",
@@ -187,12 +145,8 @@ _PROFILE_TO_SUFFIX: dict[str, str] = {
 }
 
 
-# ---------------------------------------------------------------------------
 # Helpers
-# ---------------------------------------------------------------------------
 
-# Suffix appended to every openTEPES CSV filename (e.g. "_NT2030"), set by
-# export_opentepes so files are written with the NT{Period} tag from the start.
 _FILE_SUFFIX = ""
 
 
@@ -203,7 +157,6 @@ def _csv(folder: str, name: str, df: pd.DataFrame) -> None:
 
 
 def _make_loadlevels(n_hours: int) -> list[str]:
-    """Generate n_hours timestamps starting 01-01 00:00:00+01:00."""
     base = pd.Timestamp("2000-01-01 00:00:00")
     return [
         (base + pd.Timedelta(hours=h)).strftime("%m-%d %H:%M:%S+01:00")
@@ -212,7 +165,6 @@ def _make_loadlevels(n_hours: int) -> list[str]:
 
 
 def _safe_scalar(arr: Any, idx: int, default: float = 0.0) -> float:
-    """Safely extract scalar from a numpy array / list at position idx."""
     try:
         if arr is None:
             return default
@@ -232,7 +184,6 @@ def _get_char_monthly_avg(
     char_idx: int | None,
     default: float = 0.0,
 ) -> float:
-    """Return the mean of the 12 monthly values stored at char_idx."""
     if char_idx is None or tech_char_df.empty:
         return default
     rows = tech_char_df[tech_char_df["Code"] == zone]
@@ -258,7 +209,6 @@ def _get_char(
     char_idx: int | None,
     default: float = 0.0,
 ) -> float:
-    """Return a scalar characteristic value for a zone + technology row."""
     if char_idx is None or tech_char_df.empty:
         return default
     rows = tech_char_df[tech_char_df["Code"] == zone]
@@ -273,7 +223,6 @@ def _get_profile(
     zone: str,
     profile_key: str,
 ) -> np.ndarray | None:
-    """Return the numpy data array for zone + profile_key, or None."""
     for entry in profiles_df.get(profile_key, []):
         if entry.get("Code") == zone:
             data = entry.get("Data")
@@ -283,7 +232,6 @@ def _get_profile(
 
 
 def _get_hourly_series(tech_cap_df: pd.DataFrame, zone: str, col: str) -> np.ndarray | None:
-    """Return the hourly (MW/h) timeseries array for zone + column, or None."""
     if col not in tech_cap_df.columns:
         return None
     rows = tech_cap_df[tech_cap_df["Code"] == zone]
@@ -297,7 +245,6 @@ def _get_hourly_series(tech_cap_df: pd.DataFrame, zone: str, col: str) -> np.nda
 
 
 def _col_val(tech_cap_df: pd.DataFrame, zone: str, col: str) -> float:
-    """Return the numeric capacity value for zone + column (0 if missing)."""
     if col not in tech_cap_df.columns:
         return 0.0
     rows = tech_cap_df[tech_cap_df["Code"] == zone]
@@ -306,7 +253,7 @@ def _col_val(tech_cap_df: pd.DataFrame, zone: str, col: str) -> float:
     cell = rows.iloc[0][col]
     try:
         v = float(cell)
-        return 0.0 if v != v else v  # NaN != NaN
+        return 0.0 if v != v else v
     except Exception:
         return 0.0
 
@@ -328,9 +275,7 @@ def _node_latlon(node_df: pd.DataFrame, zone: str) -> tuple[float, float]:
         return 0.0, 0.0
 
 
-# ---------------------------------------------------------------------------
 # Individual CSV writers
-# ---------------------------------------------------------------------------
 
 def _write_dicts(
     folder: str,
@@ -344,16 +289,14 @@ def _write_dicts(
     zone_to_area: dict | None = None,
     unique_areas: list | None = None,
 ) -> None:
-    """Write all oT_Dict_* CSV files."""
     if zone_to_area is None:
         zone_to_area = {z: "Area1" for z in zones}
     if unique_areas is None:
         unique_areas = ["Area1"]
 
-    # Each electricity node gets an auxiliary Exports node in the same zone.
     exp_nodes = [f"{z}_Exp" for z in zones]
     all_nodes = list(zones) + exp_nodes
-    node_zone = list(zones) + list(zones)  # aux Exp nodes -> parent zone
+    node_zone = list(zones) + list(zones)
 
     _csv(folder, "oT_Dict_Node.csv",
          pd.DataFrame({"Node": all_nodes}))
@@ -420,11 +363,9 @@ def _write_data_static(
     unique_areas: list | None = None,
     co2_cost: float = 0.0,
 ) -> None:
-    """Write scalar / structural data CSVs."""
     if unique_areas is None:
         unique_areas = ["Area1"]
 
-    # Node locations (the aux Exports node shares its parent's coordinates)
     loc_rows = []
     for z in zones:
         lat, lon = _node_latlon(node_df, z)
@@ -502,35 +443,26 @@ def _write_generation(
     rows = []
     for r in gen_rows:
         row = {
-            # string identifiers
             "Generator": r["Generator"], "Node": r["Node"], "Technology": r["Technology"],
-            "MutuallyExclusive": "",  # group name or blank
-            # binary flags (must be 0 or 1, never blank)
+            "MutuallyExclusive": "",
             "MustRun":               r.get("MustRun", 0),
             "BinaryInvestment":      0, "BinaryRetirement":   0, "BinaryCommitment":   0,
             "NoOperatingReserve":    0, "OutflowsIncompatibility": 0,
-            # type strings — 0 maps to idxCycle[0]=1 (hourly); avoids NaN on .astype('int')
             "StorageType":  "",
             "OutflowsType": "", "EnergyType": 0,
-            # time bounds
             "InitialPeriod": scenario, "FinalPeriod": scenario,
-            # power (MW)
             "MaximumPower":      r.get("MaximumPower", 0),
             "MinimumPower":      r.get("MinimumPower", 0),
             "MaximumPowerHeat":  0, "MinimumPowerHeat": 0,
-            # storage (MW / MWh)
             "MaximumCharge":  r.get("MaximumCharge", 0),
             "MinimumCharge":  0,
-            # InitialStorage = 50% of MaximumStorage (blank when no storage)
             "InitialStorage": round(float(r["MaximumStorage"]) * 0.5, 6)
                               if str(r.get("MaximumStorage", "")) not in ("", "0", "0.0") else "",
             "MaximumStorage": r.get("MaximumStorage", 0),
             "MinimumStorage": r.get("MinimumStorage", 0),
-            # technical parameters
-            "Efficiency": r.get("Efficiency", ""),  # blank = use LinearTerm as heat rate
+            "Efficiency": r.get("Efficiency", ""),
             "ShiftTime": 0,
             "EFOR":      r.get("EFOR", ""),
-            # Ramp rates intentionally left blank (not modelled).
             "RampUp":    "",
             "RampDown":  "",
             "UpTime": 0, "DownTime": 0, "StableTime": 0,
@@ -538,15 +470,12 @@ def _write_generation(
             "LinearTerm":     round(1.0 / r["LinearTermEff"], 6) if r.get("LinearTermEff") else 1,
             "ConstantTerm":   0, "OMVariableCost": r.get("OMVariableCost", 0),
             "OperReserveCost": 0, "StartUpCost": 0, "ShutDownCost": 0,
-            # emissions
             "CO2EmissionRate": r.get("CO2EmissionRate", 0),
             "Availability":    r.get("Availability", 1.0),
-            # investment (all existing capacity, no investment modelled)
             "FixedInvestmentCost": 0, "FixedRetirementCost": 0, "FixedChargeRate": 0,
             "StorageInvestment": 0, "Inertia": 0,
             "MaximumReactivePower": 0, "MinimumReactivePower": 0,
             "InvestmentLo": 0, "InvestmentUp": 0, "RetirementLo": 0, "RetirementUp": 0,
-            # production functions (H2 set for electrolysers when H2 carrier is on)
             "ProductionFunctionHydro": 0, "ProductionFunctionH2": r.get("ProductionFunctionH2", 0),
             "ProductionFunctionHeat": 0,  "ProductionFunctionH2ToHeat": 0,
         }
@@ -557,7 +486,6 @@ def _write_generation(
 
 
 def _network_to_df(data) -> pd.DataFrame:
-    """Convert a network_df value (numpy array or DataFrame) to a DataFrame."""
     if data is None:
         return pd.DataFrame()
     if isinstance(data, pd.DataFrame):
@@ -569,13 +497,6 @@ def _network_to_df(data) -> pd.DataFrame:
 
 
 def h2_main_zones(network_df: dict, selected_zones: list[str]) -> dict[str, str]:
-    """Map each country prefix to its single hydrogen node (the "main" zone).
-
-    The node is the country's endpoint in the H2 network (``Lines_H``) when that
-    endpoint is selected, else the country's first selected zone. Hydrogen demand
-    and the intra-country H2 links attach to this node — used by both the
-    openTEPES export and the Normal export so they stay consistent.
-    """
     cap_df = _network_to_df(network_df.get("Line Capacity (Hydrogen)")) if network_df else pd.DataFrame()
     sel_set = {str(z) for z in selected_zones}
     rep: dict[str, str] = {}
@@ -589,11 +510,6 @@ def h2_main_zones(network_df: dict, selected_zones: list[str]) -> dict[str, str]
 
 
 def h2_intra_country_pairs(rep_map: dict[str, str], zones: list[str]) -> list[tuple[str, str]]:
-    """(main, other) pairs linking each country's other selected zones to its main
-    H2 node — the intra-country "virtual" H2 links. A country has a single
-    cross-border H2 node, so its other zones reach the network through these
-    links. Used by both the openTEPES and the Normal (Networks.xlsx) exports.
-    """
     country_zones: dict[str, list] = {}
     for z in zones:
         country_zones.setdefault(str(z)[:2], []).append(z)
@@ -624,7 +540,6 @@ def _get_loss_fraction(loss_df: pd.DataFrame, frm: str, to: str) -> float:
 
 
 def _get_length(loss_df: pd.DataFrame, frm: str, to: str) -> float:
-    """Return Length (km) for the frm→to line from the loss-fraction table."""
     if loss_df.empty:
         return 0.0
     match = loss_df[
@@ -639,14 +554,9 @@ def _get_length(loss_df: pd.DataFrame, frm: str, to: str) -> float:
     return 0.0
 
 
-# Per-unit impedance base for line reactance: Z_base = V_base^2 / S_base =
-# (400 kV)^2 / 100 MVA = 1600 ohm. Reactance is 0.4 ohm/km * length, made p.u.
 _REACTANCE_OHM_PER_KM = 0.4
 _Z_BASE_OHM = 400.0 ** 2 / 100.0
 
-# Default electrolyser efficiency used when a zone has electrolyser capacity but
-# a blank/zero efficiency in the source PEMMDB data (the value all other zones
-# report). Feeds ProductionFunctionH2 = 1000 / efficiency.
 _DEFAULT_ELECTROLYSER_EFF = 0.68
 
 
@@ -654,11 +564,6 @@ def _zone_export_series(
     export_df: "pd.DataFrame | None", zone: str, selected_hours: int,
     prefix: str = "Exports",
 ) -> np.ndarray:
-    """Net hourly exports of *zone* to zones outside the selection.
-
-    Sums every ``<prefix>_<zone>_*`` column (electricity uses ``Exports``,
-    hydrogen ``H2Exports``). Units follow the source columns (MW).
-    """
     exp = np.zeros(selected_hours)
     if isinstance(export_df, pd.DataFrame) and not export_df.empty:
         exp_cols = [c for c in export_df.columns if str(c).startswith(f"{prefix}_{zone}_")]
@@ -678,7 +583,6 @@ def _write_network(
     export_df: "pd.DataFrame | None" = None,
     selected_hours: int = 0,
 ) -> tuple[list[str], list[dict]]:
-    """Write oT_Data_Network.csv (electricity only). Return (circuit_ids, rows)."""
     net_cols = [
         "InitialNode", "FinalNode", "Circuit", "LineType", "Switching",
         "InitialPeriod", "FinalPeriod", "Voltage", "Length",
@@ -707,8 +611,6 @@ def _write_network(
             ttc_bck = float(row.iloc[3])
         except Exception:
             pass
-        # Drop lines with no capacity in either direction; if only one direction
-        # is zero, floor it to 1e-6 (1 W) so the line stays modelled.
         if ttc == 0 and ttc_bck == 0:
             continue
         if ttc == 0:
@@ -739,9 +641,6 @@ def _write_network(
         })
         rows.append(line_row)
 
-    # Connect each electricity node to its auxiliary Exports node. The line
-    # capacity is the peak (max absolute) hourly net export of that zone to
-    # zones outside the selection; a zone with no external exchange gets 1e-6.
     cid = "AC1"
     if cid not in circuit_ids:
         circuit_ids.append(cid)
@@ -786,7 +685,6 @@ def _write_network_h2(
     export_df: "pd.DataFrame | None" = None,
     selected_hours: int = 0,
 ) -> bool:
-    """Write oT_Data_NetworkHydrogen.csv. Return True if any H2 lines written."""
     h2_cols = [
         "InitialNode", "FinalNode", "Circuit",
         "InitialPeriod", "FinalPeriod", "Length",
@@ -813,8 +711,6 @@ def _write_network_h2(
             ttc_bck = float(row.iloc[3])
         except Exception:
             pass
-        # Drop pipes with no capacity in either direction; scale real capacities
-        # to the H2 demand units (/1000); a one-sided zero is floored to 1e-6.
         if ttc == 0 and ttc_bck == 0:
             continue
         ttc     = ttc / 1000.0     if ttc != 0     else 1e-6
@@ -827,14 +723,14 @@ def _write_network_h2(
             ]
             if not match.empty:
                 try:
-                    length = float(match.iloc[0, 2])  # Length_km column
+                    length = float(match.iloc[0, 2])
                 except Exception:
                     pass
         line_row = {c: "" for c in h2_cols}
         line_row.update({
             "InitialNode":    frm,
             "FinalNode":      to,
-            "Circuit":        "AC1",  # reuse the electricity circuit id (in oT_Dict_Circuit)
+            "Circuit":        "AC1",
             "InitialPeriod":  scenario,
             "FinalPeriod":    scenario,
             "Length":         round(length, 1),
@@ -844,9 +740,6 @@ def _write_network_h2(
         })
         rows.append(line_row)
 
-    # Intra-country H2 links: a country has a single cross-border H2 node (its
-    # representative/main zone), so connect that node to the country's other
-    # selected zones with a high-capacity pipe — H2 flows freely within a country.
     if rep_map is None:
         rep_map = {}
         for z in zones:
@@ -866,9 +759,6 @@ def _write_network_h2(
         })
         rows.append(link)
 
-    # Aux H2 export lines: connect each main zone to its {main}_Exp node, which
-    # carries the country's net H2 exchange with outside the selection. Capacity
-    # is the peak |net H2 export|, scaled to H2 units (/1000); 1e-6 if none.
     rep_nodes = list(dict.fromkeys(rep_map.get(str(z)[:2], z) for z in zones))
     for rep in rep_nodes:
         cap = 0.0
@@ -909,20 +799,16 @@ def _write_demand(
 ) -> None:
     demand_data: dict[str, list] = {}
     for zone in zones:
-        # Electricity demand on the electricity node (unchanged)
         arr = _get_profile(profiles_df, zone, "Electricity Demand Profile")
         elec = np.array(arr[:selected_hours], dtype=float) if arr is not None \
             else np.zeros(selected_hours)
         demand_data[zone] = list(elec)
 
-        # Net exports to zones outside the selection on the {zone}_Exp node
         exp_demand = _zone_export_series(export_df, zone, selected_hours)
         demand_data[f"{zone}_Exp"] = list(exp_demand)
 
     all_nodes = list(zones) + [f"{z}_Exp" for z in zones]
 
-    # Nodes whose demand is zero at every load level: keep them at 0 rather than
-    # applying the 1 W floor (don't invent demand for a node that never has any).
     all_zero_nodes = {
         node for node in all_nodes
         if not any(round(float(x), 4) != 0 for x in demand_data[node])
@@ -938,9 +824,9 @@ def _write_demand(
             if fv != 0:
                 row[node] = fv
             elif node in all_zero_nodes:
-                row[node] = ""       # all-zero column: leave blank, no floor
+                row[node] = ""
             else:
-                row[node] = 1e-6     # 1 W floor when demand is 0 this hour
+                row[node] = 1e-6
         rows.append(row)
     _csv(folder, "oT_Data_Demand.csv", pd.DataFrame(rows))
 
@@ -956,17 +842,8 @@ def _write_demand_hydrogen(
     rep_map: dict[str, str] | None = None,
     export_df: "pd.DataFrame | None" = None,
 ) -> None:
-    """Write oT_Data_DemandHydrogen.csv (H2 demand per node, kept in MW).
-
-    Needs a column for every node (electricity zones + their aux Exp nodes);
-    H2 demand sits on the electricity nodes, the aux nodes get 0. Providing this
-    file switches on openTEPES' hydrogen carrier (pIndHydrogen).
-    """
     all_nodes = list(zones) + [f"{z}_Exp" for z in zones]
 
-    # One H2 node per country: the country's H2 demand goes on its representative
-    # (main) zone; the country's other zones carry no H2 demand and reach the H2
-    # network through the intra-country H2 links.
     if rep_map is None:
         rep_map = {}
         for z in zones:
@@ -979,14 +856,10 @@ def _write_demand_hydrogen(
         arr = _get_profile(profiles_df, zone, "Hydrogen Demand Profile")
         h2_data[zone] = np.asarray(arr[:selected_hours], dtype=float) if arr is not None \
             else np.zeros(selected_hours)
-        # Net H2 export to outside the selection sits on the main zone's aux Exp
-        # node (H2Exports_<main>_* columns; scaled to H2 units by the /1000 below).
         h2_data[f"{zone}_Exp"] = _zone_export_series(
             export_df, zone, selected_hours, prefix="H2Exports"
         )
 
-    # Nodes whose demand is zero at every load level: keep them blank rather than
-    # applying the 1e-6 floor (don't invent demand for a node that never has any).
     all_zero_nodes = {
         node for node in all_nodes
         if not any(
@@ -1005,9 +878,9 @@ def _write_demand_hydrogen(
             if fv != 0:
                 row[node] = fv
             elif node in all_zero_nodes:
-                row[node] = ""       # all-zero column: leave blank, no floor
+                row[node] = ""
             else:
-                row[node] = 1e-6     # floor when demand is 0 this hour
+                row[node] = 1e-6
         rows.append(row)
     _csv(folder, "oT_Data_DemandHydrogen.csv", pd.DataFrame(rows))
 
@@ -1022,16 +895,8 @@ def _write_variable_profiles(
     loadlevels: list[str],
     sc_name: str = "sc01",
 ) -> None:
-    """Write oT_Data_VariableMaxGeneration (and blank Variable* files)."""
-    # Build set of RES generators that have a profile
-    # gen_name â†’ (zone, suffix, max_power)
     gen_index = {r["Generator"]: r for r in gen_rows if r.get("is_RES")}
 
-    # Solar fallback: when a solar type has capacity but its own profile is
-    # missing / all-zero, borrow its paired solar profile (already loaded for the
-    # same zone & period) so every solar generator with capacity gets a profile.
-    #   rooftop -> utility PV (LFSolarPV) ; utility PV -> LFSolarPVUtility ;
-    #   CSP no-storage <-> CSP with-storage
     _SOLAR_FALLBACK = {
         "SolarRoof":  "Solar Profile",
         "Solar":      "Solar_Utility Profile",
@@ -1039,7 +904,6 @@ def _write_variable_profiles(
         "SolarCSP_S": "CSP_noStorage Profile",
     }
 
-    # profile_key â†’ {gen_name: np.ndarray}
     col_data: dict[str, np.ndarray] = {}
     for profile_key, suffix in _PROFILE_TO_SUFFIX.items():
         for r in gen_rows:
@@ -1050,7 +914,6 @@ def _write_variable_profiles(
             zone = r["Node"]
             max_p = r.get("MaximumPower", 0.0)
             arr = _get_profile(profiles_df, zone, profile_key)
-            # Capacity present but primary profile missing/all-zero → use the pair.
             if max_p > 0 and suffix in _SOLAR_FALLBACK \
                     and (arr is None or not np.any(np.asarray(arr, dtype=float))):
                 fb = _get_profile(profiles_df, zone, _SOLAR_FALLBACK[suffix])
@@ -1059,16 +922,13 @@ def _write_variable_profiles(
             if arr is None:
                 continue
             gen_name = r["Generator"]
-            # Capacity factor Ã— installed capacity (profiles are 0-1 factors)
             cf = arr[:selected_hours]
             if cf.max() <= 1.01:
                 values = cf * max_p
             else:
-                values = cf  # already in MW
+                values = cf
             col_data[gen_name] = values
 
-    # Techs whose VariableMaxGeneration comes straight from an hourly (MW/h)
-    # timeseries in tech_cap_df (used directly, no capacity multiplication).
     _DIRECT_HOURLY = {
         "Other RES (biomass) (MW)":   "Other RES (biomass) (MW/h)",
         "Other RES (geothermal) (MW)": "Other RES (geothermal) (MW/h)",
@@ -1090,12 +950,8 @@ def _write_variable_profiles(
             continue
         col_data[r["Generator"]] = np.asarray(arr[:selected_hours], dtype=float)
 
-    # Full generator label list (all generators, in gen_rows order)
     all_gen_names = [r["Generator"] for r in gen_rows]
 
-    # Generators whose profile is zero at every load level (e.g. zero installed
-    # capacity): keep them at 0 rather than applying the 1 W floor, so we don't
-    # invent 1 W of capacity for a generator that produces nothing all year.
     all_zero_gens: set[str] = set()
     for gn, arr in col_data.items():
         vals = np.asarray(arr[:len(loadlevels)], dtype=float)
@@ -1103,7 +959,6 @@ def _write_variable_profiles(
         if vals.size == 0 or not np.any(np.round(vals, 4) != 0):
             all_zero_gens.add(gn)
 
-    # VariableMaxGeneration: keep computed values, add remaining generators empty.
     rows = []
     for i, ll in enumerate(loadlevels):
         row: dict = {"Period": scenario, "Scenario": sc_name, "LoadLevel": ll}
@@ -1117,9 +972,9 @@ def _write_variable_profiles(
                     if fv != 0:
                         row[gn] = fv
                     elif gn in all_zero_gens:
-                        row[gn] = ""       # all-zero/empty column: leave blank, no floor
+                        row[gn] = ""
                     else:
-                        row[gn] = 1e-6     # 1 W floor when CF×capacity is 0 this hour
+                        row[gn] = 1e-6
             else:
                 row[gn] = ""
         rows.append(row)
@@ -1127,9 +982,6 @@ def _write_variable_profiles(
     df = pd.DataFrame(rows)
     _csv(folder, "oT_Data_VariableMaxGeneration.csv", df)
 
-    # Run-of-river hydro is non-dispatchable: set VariableMinGeneration equal to
-    # VariableMaxGeneration for those generators (only where Max has values); every
-    # other generator column stays blank.
     hydro_ror_gens = {r["Generator"] for r in gen_rows if r.get("suffix") == "HydroRoR"}
     min_gen_df = df.copy()
     _meta = {"Period", "Scenario", "LoadLevel"}
@@ -1138,7 +990,6 @@ def _write_variable_profiles(
             min_gen_df[col] = ""
     _csv(folder, "oT_Data_VariableMinGeneration.csv", min_gen_df)
 
-    # Blank variable files: full generator label columns with empty values.
     blank_rows = []
     for ll in loadlevels:
         row = {"Period": scenario, "Scenario": sc_name, "LoadLevel": ll}
@@ -1159,10 +1010,6 @@ def _write_variable_profiles(
     ]:
         _csv(folder, fname, blank_df)
 
-    # Energy inflows apply to hydro units (from their Flow Energy series); outflows
-    # are unused now that hydrogen demand is modelled via the H2 carrier. Both files
-    # carry every generator column; generators without values are blank (all-zero
-    # columns omitted). profiles_df is already hourly, so index the series by hour.
     _HYDRO_FLOW = {
         "HydroRoR":  "River Flow Energy",
         "HydroPond": "Pondage Flow Energy",
@@ -1176,13 +1023,13 @@ def _write_variable_profiles(
         if series is None or len(series) == 0:
             return None
         vals = [round(float(series[min(h, len(series) - 1)]), 6) for h in range(len(loadlevels))]
-        return vals if any(v != 0 for v in vals) else None   # all-zero -> blank
+        return vals if any(v != 0 for v in vals) else None
 
     inflow_cols: dict[str, list] = {}
     outflow_cols: dict[str, list] = {}
     for r in gen_rows:
         suffix = r.get("suffix", "")
-        if suffix in _HYDRO_FLOW:                      # hydro inflows
+        if suffix in _HYDRO_FLOW:
             col = _hourly_col(r["Node"], _HYDRO_FLOW[suffix])
             if col is not None:
                 inflow_cols[r["Generator"]] = col
@@ -1234,9 +1081,7 @@ def _write_reserve_files(
     _csv(folder, "oT_Data_Inertia.csv", pd.DataFrame(inertia_rows))
 
 
-# ---------------------------------------------------------------------------
 # Main entry point
-# ---------------------------------------------------------------------------
 
 def export_opentepes(
     tech_cap_df: pd.DataFrame,
@@ -1255,24 +1100,7 @@ def export_opentepes(
     lignite_groups: dict[str, str] | None = None,
     reserve_df: pd.DataFrame | None = None,
 ) -> None:
-    """Write the complete openTEPES CSV input set to *output_folder*.
-
-    Args:
-        tech_cap_df:    Technology capacity DataFrame (one row per zone).
-        tech_char_df:   Technology characteristics DataFrame.
-        profiles_df:    Time-series profiles dict.
-        export_df:      Cross-border exchange flows DataFrame.
-        storage_df:     Storage capacity arrays.
-        network_df:     Network lines dict.
-        node_df:        Nodes table (for lat/lon).
-        selected_zones: Zone codes to include.
-        selected_hours: Number of hourly time steps.
-        scenario:       Scenario year (e.g. 2030).
-        output_folder:  Destination directory for CSV files.
-    """
     os.makedirs(output_folder, exist_ok=True)
-    # Tag every file with an _NT{Period} suffix as it is written (e.g.
-    # oT_Data_Generation_NT2030.csv). The output folder is wiped before each run.
     global _FILE_SUFFIX
     _FILE_SUFFIX = f"_NT{scenario}"
     loadlevels = _make_loadlevels(selected_hours)
@@ -1283,10 +1111,9 @@ def export_opentepes(
     if lignite_groups is None:
         lignite_groups = {}
 
-    # Build zone -> area mapping from the Nodes "Country" column (spaces -> "_")
     zone_to_area: dict[str, str] = {}
     for z in selected_zones:
-        area = z  # fallback: use zone code itself
+        area = z
         if isinstance(node_df, pd.DataFrame) and {"Code", "Country"}.issubset(node_df.columns):
             match = node_df[node_df["Code"] == z]
             if not match.empty:
@@ -1294,7 +1121,6 @@ def export_opentepes(
         zone_to_area[z] = area
     unique_areas: list[str] = list(dict.fromkeys(zone_to_area.values()))
 
-    # FRR (total) reserve per area = sum of member zones' Total (FRR) (MW/h)
     area_fcr: dict[str, float] = {a: 0.0 for a in unique_areas}
     if isinstance(reserve_df, pd.DataFrame) and "Code" in reserve_df.columns \
             and "Total (FRR) (MW/h)" in reserve_df.columns:
@@ -1306,23 +1132,17 @@ def export_opentepes(
                 val = float(row["Total (FRR) (MW/h)"].iloc[0])
             except (TypeError, ValueError):
                 continue
-            if val == val:  # not NaN
+            if val == val:
                 area_fcr[zone_to_area[z]] += val
 
-    # â"€â"€ Build generator list â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
     gen_rows: list[dict] = []
     all_technologies: list[str] = []
 
-    # DSR type count is data-driven (max across zones, from tech_cap_df); Other
-    # Non-RES is fixed at 27. Build the technology table for this DSR count.
     n_dsr = sum(1 for c in tech_cap_df.columns
                 if str(c).startswith("DSR") and str(c).endswith("(MW)"))
     tech_entries = _build_tech_entries(n_dsr)
     battery_idx = _battery_char_idx(n_dsr)
 
-    # Hydrogen carrier is enabled when the selection has any H2 demand (2030/2040;
-    # 2050 has none). When on, electrolysers get a ProductionFunctionH2 and the
-    # oT_Data_DemandHydrogen / oT_Data_NetworkHydrogen files are written.
     h2_enabled = any(
         (_get_profile(profiles_df, z, "Hydrogen Demand Profile") is not None
          and np.any(np.asarray(_get_profile(profiles_df, z, "Hydrogen Demand Profile"), dtype=float)))
@@ -1330,7 +1150,6 @@ def export_opentepes(
     )
 
     for zone in selected_zones:
-        # DSR / Other Non-RES columns with capacity present in this zone
         _single_dsr = len([
             c for c, *_ in tech_entries
             if c.startswith("DSR") and _col_val(tech_cap_df, zone, c) != 0
@@ -1340,18 +1159,14 @@ def export_opentepes(
             if c.startswith("Other Non-RES") and _col_val(tech_cap_df, zone, c) != 0
         ]) == 1
         for cap_col, suffix, ot_tech, is_res, char_idx in tech_entries:
-            # Skip DSR / Other Non-RES types that have no capacity in this zone
             if (cap_col.startswith("DSR") or cap_col.startswith("Other Non-RES")) \
                     and _col_val(tech_cap_df, zone, cap_col) == 0:
                 continue
 
             if cap_col.startswith("DSR"):
-                # Single DSR type → label "DSR"; Technology is always "DSR"
                 gen_label = "DSR" if _single_dsr else _tech_label(cap_col)
                 tech_lbl  = "DSR"
             elif cap_col.startswith("Other Non-RES"):
-                # Single Other Non-RES type → label "Other_Non_RES"; Technology
-                # is always "Other_Non_RES"
                 gen_label = "Other_Non_RES" if _single_onr else _tech_label(cap_col)
                 tech_lbl  = "Other_Non_RES"
             else:
@@ -1359,14 +1174,12 @@ def export_opentepes(
             gen_name = f"{zone}_{gen_label}"
             all_technologies.append(tech_lbl)
 
-            # Capacity: Battery stores MWh in tech_cap_df; get MW from tech_char_df
             if cap_col in _CHAR_POWER_COLS:
                 p_col, c_col = _CHAR_POWER_COLS[cap_col]
                 max_p      = _get_char(tech_char_df, zone, p_col, battery_idx, 0.0)
                 max_charge = _get_char(tech_char_df, zone, c_col, battery_idx, 0.0)
                 max_storage = _col_val(tech_cap_df, zone, cap_col)
             elif cap_col == "Electrolyser (MW)":
-                # Electrolyser is a consumer: its capacity goes to MaximumCharge
                 max_p       = 0.0
                 max_charge  = _col_val(tech_cap_df, zone, cap_col)
                 max_storage = 0.0
@@ -1377,7 +1190,6 @@ def export_opentepes(
                 pump_col    = _PUMP_PAIRS.get(cap_col)
                 max_charge  = _col_val(tech_cap_df, zone, pump_col) if pump_col else 0.0
 
-            # â"€â"€ Characteristics â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
             min_pct     = _get_char(tech_char_df, zone, "Minimum Stable Power (%)", char_idx, 0.0) / 100.0
             ramp_up     = _get_char(tech_char_df, zone, "Ramp-Up Rate (MW/h)", char_idx, 0.0)
             ramp_dn     = _get_char(tech_char_df, zone, "Ramp-Down Rate (MW/h)", char_idx, 0.0)
@@ -1385,17 +1197,10 @@ def export_opentepes(
             efficiency  = _get_char(tech_char_df, zone, "Efficiency (%)", char_idx, 0.0)
             co2_rate    = _get_char(tech_char_df, zone, "CO2 Factor (ton/MWh)", char_idx, 0.0)
 
-            # Predefined efficiency written to output: 0.9 battery, 0.7 pump, else 1.
             out_eff = (0.9 if cap_col in _CHAR_POWER_COLS
                        else 0.7 if cap_col in _PUMP_PAIRS
                        else 1.0)
 
-            # Electrolyser: real efficiency goes into ProductionFunctionH2
-            # (electricity per unit H2 = 1/efficiency; H2 demand is kept in MW).
-            # Only when the hydrogen carrier is enabled; Efficiency column stays 1.
-            # Some zones (e.g. HR/HU/IE/SI) have electrolyser capacity but a blank
-            # efficiency in the source data; fall back to the default so the
-            # electrolyser can still produce H2 instead of being left non-functional.
             prod_func_h2 = 0.0
             if cap_col == "Electrolyser (MW)" and h2_enabled:
                 _eff = _get_char(tech_char_df, zone, "Efficiency (%)", battery_idx + 1, 0.0)
@@ -1403,14 +1208,11 @@ def export_opentepes(
                     _eff = _DEFAULT_ELECTROLYSER_EFF
                 prod_func_h2 = round(1000.0 / _eff, 6)
 
-            # LinearTerm (heat rate) is only defined for thermal units and DSR;
-            # everything else uses an efficiency of 1 (→ LinearTerm = 1).
             is_thermal = ot_tech in {"Nuclear", "Coal", "Lignite", "Gas", "Oil", "Hydrogen"}
             lin_eff = efficiency if (is_thermal or cap_col.startswith("DSR")) else 1.0
 
             min_p    = round(min_pct * max_p, 2) if (not is_res and min_pct > 0) else 0.0
 
-            # Must Run: average 12 monthly values; if any > 0, flag unit as must-run
             must_run_pct = _get_char_monthly_avg(tech_char_df, zone, "Must Run (%)", char_idx, 0.0)
             if must_run_pct > 0 and not is_res:
                 must_run_flag = "Yes"
@@ -1418,7 +1220,6 @@ def export_opentepes(
             else:
                 must_run_flag = ""
 
-            # Commodity fuel cost from TYNDP 2024 prices (EUR/MWh)
             if suffix in _SUFFIX_FUEL:
                 fuel_key = _SUFFIX_FUEL[suffix]
             elif ot_tech == "Lignite":
@@ -1428,7 +1229,6 @@ def export_opentepes(
                 fuel_key = _OT_TECH_FUEL.get(ot_tech, "")
             commodity_fuel = round(commodity_prices.get(fuel_key, 0.0), 4) if fuel_key else 0.0
 
-            # DSR / Other Non-RES: their Price goes to FuelCost (not OMVariableCost).
             is_dsr_onr = cap_col.startswith("DSR") or cap_col.startswith("Other Non-RES")
 
             row: dict = {
@@ -1458,25 +1258,17 @@ def export_opentepes(
             }
             gen_rows.append(row)
 
-    # â"€â"€ Write Dict files â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
     circuit_ids, _ = _write_network(output_folder, network_df, selected_zones, scenario,
                                     export_df=export_df, selected_hours=selected_hours)
     _write_dicts(output_folder, selected_zones, gen_rows, circuit_ids, loadlevels, scenario, all_technologies, sc_name, zone_to_area, unique_areas)
 
-    # -- Write Data files ----------------------------------------------------
+    # Write Data files
     _write_data_static(output_folder, selected_zones, node_df, scenario, loadlevels, sc_name, unique_areas,
                        co2_cost=commodity_prices.get("CO2_price", 0.0) if commodity_prices else 0.0)
     _write_generation(output_folder, gen_rows, scenario)
     _write_demand(output_folder, profiles_df, selected_zones, selected_hours, scenario, loadlevels, sc_name,
                   tech_char_df=tech_char_df, export_df=export_df)
-    # Hydrogen carrier: when the selection has H2 demand (2030/2040), write the H2
-    # demand per node (in MW) and the cross-border H2 pipeline network. Together
-    # these switch on openTEPES' pIndHydrogen, so countries can trade H2 and an
-    # electrolyser need not supply its whole national demand locally.
     if h2_enabled:
-        # Representative H2 node per country = the "main" zone from the Lines_H
-        # network (the node kept when it is selected), else the country's first
-        # selected zone. H2 demand and the intra-country links use this node.
         h2_rep = h2_main_zones(network_df, selected_zones)
         _write_demand_hydrogen(output_folder, profiles_df, selected_zones, selected_hours,
                                scenario, loadlevels, sc_name, rep_map=h2_rep, export_df=export_df)

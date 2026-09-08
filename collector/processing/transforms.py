@@ -1,5 +1,3 @@
-"""Preprocessing and transformation functions for network, storage, and profile data."""
-
 from __future__ import annotations
 
 import numpy as np
@@ -19,33 +17,13 @@ from collector.utils.config import (
 from collector.utils.helpers import expand_profile_to_hourly, validate_option
 
 
-# ---------------------------------------------------------------------------
 # Geographic calculations
-# ---------------------------------------------------------------------------
 
 
 def haversine_km(
     lat1: float, lon1: float,
     lat2: float, lon2: float,
 ) -> float:
-    """Calculate the great-circle distance between two points on Earth.
-
-    Uses the Haversine formula with the mean Earth radius
-    :data:`~collector.utils.config.EARTH_RADIUS_KM`.
-
-    Args:
-        lat1 (float): Latitude of point 1 in decimal degrees.
-        lon1 (float): Longitude of point 1 in decimal degrees.
-        lat2 (float): Latitude of point 2 in decimal degrees.
-        lon2 (float): Longitude of point 2 in decimal degrees.
-
-    Returns:
-        float: Distance in kilometres.
-
-    Example:
-        >>> round(haversine_km(40.4, -3.7, 38.7, -9.1), 1)
-        495.6
-    """
     lat1, lon1, lat2, lon2 = map(np.radians, [lat1, lon1, lat2, lon2])
     dlat = lat2 - lat1
     dlon = lon2 - lon1
@@ -60,33 +38,6 @@ def compute_lengths_and_losses(
     between_only: bool = True,
     loss_per_100km: float = DEFAULT_LOSS_PER_100KM,
 ) -> pd.DataFrame:
-    """Compute line lengths and loss fractions for a network edge table.
-
-    Adds a ``Length_km`` column (Haversine distance) and a
-    ``Loss_fraction`` column (length × loss_per_km) to a filtered copy of
-    *edges_df*.
-
-    Args:
-        node_df (pd.DataFrame): Nodes table with ``Code``, ``Latitude``, and
-            ``Longitude`` columns.
-        edges_df (pd.DataFrame): Edge table with ``Start_Node`` and
-            ``End_Node`` columns.
-        selected_zones (list[str]): Study-area zone codes.
-        between_only (bool): When ``True`` (default), keep only edges where
-            *both* endpoints are in *selected_zones*.  When ``False``, keep
-            any edge that touches at least one selected zone.
-        loss_per_100km (float): Percentage transmission loss per 100 km.
-            Defaults to :data:`~collector.utils.config.DEFAULT_LOSS_PER_100KM`.
-
-    Returns:
-        pd.DataFrame: Columns ``Start_Node``, ``End_Node``, ``Length_km``,
-            ``Loss_fraction``.
-
-    Example:
-        >>> result = compute_lengths_and_losses(nodes, edges_e, ["ES00", "PT00"])
-        >>> "Loss_fraction" in result.columns
-        True
-    """
     nodes = (
         node_df[["Code", "Latitude", "Longitude"]]
         .drop_duplicates(subset=["Code"])
@@ -126,28 +77,13 @@ def compute_lengths_and_losses(
     return edges[["Start_Node", "End_Node", "Length_km", "Loss_fraction"]].reset_index(drop=True)
 
 
-# ---------------------------------------------------------------------------
 # Network edge filtering
-# ---------------------------------------------------------------------------
 
 
 def filter_electricity_edges(
     edges_e_df: pd.DataFrame,
     selected_zones: list[str],
 ) -> pd.DataFrame:
-    """Filter electricity edges to those touching selected zones and rename capacity columns.
-
-    Args:
-        edges_e_df (pd.DataFrame): Full electricity edge table.
-        selected_zones (list[str]): Zone codes defining the study area.
-
-    Returns:
-        pd.DataFrame: Filtered frame with columns ``Start_Node``, ``End_Node``,
-            ``Capacity (From)``, and ``Capacity (To)``.
-
-    Example:
-        >>> filtered = filter_electricity_edges(edges_e, ["ES00", "PT00"])
-    """
     mask = (
         edges_e_df["Start_Node"].astype(str).isin([str(z) for z in selected_zones]) |
         edges_e_df["End_Node"].astype(str).isin([str(z) for z in selected_zones])
@@ -165,33 +101,6 @@ def filter_gas_edges(
     selected_zones: list[str],
     gas_pipe: str,
 ) -> pd.DataFrame:
-    """Filter gas pipeline edges and select the capacity columns for the chosen scenario.
-
-    Column index mapping for gas pipe variants:
-    * ``'Existing'`` → columns 3–4
-    * ``'Low'``      → columns 5–6
-    * ``'Advanced'`` → columns 7–8
-    * ``'High'``     → columns 9–10
-
-    Capacity values are converted from GWh/day to MW via
-    :data:`~collector.utils.config.GAS_UNIT_FACTOR`.
-
-    Args:
-        edges_g_df (pd.DataFrame): Full gas pipeline edge table.
-        selected_zones (list[str]): Zone codes defining the study area.
-        gas_pipe (str): Pipeline scenario – one of
-            :data:`~collector.utils.config.GAS_PIPE_OPTIONS`.
-
-    Returns:
-        pd.DataFrame: Columns ``Start_Node``, ``End_Node``,
-            ``Capacity (From)``, ``Capacity (To)`` in MW.
-
-    Raises:
-        ValueError: When *gas_pipe* is not a recognised option.
-
-    Example:
-        >>> filtered = filter_gas_edges(edges_g, ["ES00"], "Low")
-    """
     validate_option(gas_pipe, GAS_PIPE_OPTIONS, "gas_pipe")
     col_map = {"Existing": (3, 4), "Low": (5, 6), "Advanced": (7, 8), "High": (9, 10)}
     from_col, to_col = col_map[gas_pipe]
@@ -216,41 +125,10 @@ def filter_hydrogen_edges(
     selected_zones: list[str],
     hydrogen_pipe: str,
 ) -> pd.DataFrame:
-    """Filter hydrogen pipeline edges and select capacity columns for the chosen scenario.
-
-    Column index mapping for hydrogen pipe variants:
-    * ``'PCI/PMI'``       → columns 3–4
-    * ``'Advanced'``      → columns 5–6
-    * ``'Less-Advanced'`` → columns 7–8
-
-    Capacity values are converted from GWh/day to MW via
-    :data:`~collector.utils.config.GAS_UNIT_FACTOR`.
-
-    Args:
-        edges_h_df (pd.DataFrame): Full hydrogen pipeline edge table.
-        selected_zones (list[str]): Zone codes defining the study area.
-        hydrogen_pipe (str): Pipeline scenario – one of
-            :data:`~collector.utils.config.HYDROGEN_PIPE_OPTIONS`.
-
-    Returns:
-        pd.DataFrame: Columns ``Start_Node``, ``End_Node``,
-            ``Capacity (From)``, ``Capacity (To)`` in MW.
-
-    Raises:
-        ValueError: When *hydrogen_pipe* is not a recognised option.
-
-    Example:
-        >>> filtered = filter_hydrogen_edges(edges_h, ["ES00"], "PCI/PMI")
-    """
     validate_option(hydrogen_pipe, HYDROGEN_PIPE_OPTIONS, "hydrogen_pipe")
     col_map = {"PCI/PMI": (3, 4), "Advanced": (5, 6), "Less-Advanced": (7, 8)}
     from_col, to_col = col_map[hydrogen_pipe]
 
-    # The hydrogen network has one node per country whose code can differ from the
-    # electricity zone code (e.g. BEOF vs BE00, NLLL vs NL00, DKNS vs DKE1). Map
-    # each H2 endpoint to a selected electricity zone by country prefix (first two
-    # characters): keep it if it is already a selected zone, otherwise use the
-    # first selected zone of the same country.
     sel = [str(z) for z in selected_zones]
     sel_set = set(sel)
     country_zone: dict[str, str] = {}
@@ -268,9 +146,6 @@ def filter_hydrogen_edges(
     })
     df["Start_Node"] = df["Start_Node"].map(_to_zone)
     df["End_Node"]   = df["End_Node"].map(_to_zone)
-    # Keep pipes with at least one (mapped) endpoint selected — matching the
-    # electricity and gas edge filters, so boundary pipes (one end outside the
-    # selection) also appear in the Networks capacity table.
     df = df[
         (df["Start_Node"].isin(sel_set) | df["End_Node"].isin(sel_set))
         & (df["Start_Node"] != df["End_Node"])
@@ -281,9 +156,7 @@ def filter_hydrogen_edges(
     return df[["Start_Node", "End_Node", "Capacity (From)", "Capacity (To)"]]
 
 
-# ---------------------------------------------------------------------------
 # Storage / terminal filtering
-# ---------------------------------------------------------------------------
 
 
 def filter_gas_storages(
@@ -291,31 +164,6 @@ def filter_gas_storages(
     selected_zones: list[str],
     gas_storage: str,
 ) -> pd.DataFrame:
-    """Filter gas storage rows and select the capacity columns for the scenario.
-
-    Column index mapping:
-    * ``'Low'``      → columns 2–3 (Injection, Withdrawal)
-    * ``'Advanced'`` → columns 4–5
-    * ``'High'``     → columns 6–7
-
-    Values are converted from GWh/day to MW.
-
-    Args:
-        storages_g_df (pd.DataFrame): Full gas storage table.
-        selected_zones (list[str]): Zone codes defining the study area.
-        gas_storage (str): Storage scenario – one of
-            :data:`~collector.utils.config.GAS_STORAGE_OPTIONS`.
-
-    Returns:
-        pd.DataFrame: Columns ``Code``, ``Capacity (Injection)``,
-            ``Capacity (Withdraw)`` in MW.
-
-    Raises:
-        ValueError: When *gas_storage* is not a recognised option.
-
-    Example:
-        >>> filtered = filter_gas_storages(storages_g, ["ES00"], "Low")
-    """
     validate_option(gas_storage, GAS_STORAGE_OPTIONS, "gas_storage")
     col_map = {"Low": (2, 3), "Advanced": (4, 5), "High": (6, 7)}
     inj_col, wdraw_col = col_map[gas_storage]
@@ -337,32 +185,6 @@ def filter_hydrogen_storages(
     selected_zones: list[str],
     hydrogen_storage: str,
 ) -> pd.DataFrame:
-    """Filter hydrogen storage rows and select capacity columns for the scenario.
-
-    Column index mapping (the sheet has two leading columns, ``Zones`` and
-    ``Code``, then Injection/Withdraw pairs per scenario):
-    * ``'PCI/PMI'``       → columns 2–3 (Injection, Withdraw)
-    * ``'Advanced'``      → columns 4–5
-    * ``'Less-Advanced'`` → columns 6–7
-
-    Values are converted from GWh/day to MW.
-
-    Args:
-        storages_h_df (pd.DataFrame): Full hydrogen storage table.
-        selected_zones (list[str]): Zone codes defining the study area.
-        hydrogen_storage (str): Storage scenario – one of
-            :data:`~collector.utils.config.HYDROGEN_STORAGE_OPTIONS`.
-
-    Returns:
-        pd.DataFrame: Columns ``Code``, ``Capacity (Injection)``,
-            ``Capacity (Withdraw)`` in MW.
-
-    Raises:
-        ValueError: When *hydrogen_storage* is not a recognised option.
-
-    Example:
-        >>> filtered = filter_hydrogen_storages(storages_h, ["ES00"], "PCI/PMI")
-    """
     validate_option(hydrogen_storage, HYDROGEN_STORAGE_OPTIONS, "hydrogen_storage")
     col_map = {"PCI/PMI": (2, 3), "Advanced": (4, 5), "Less-Advanced": (6, 7)}
     inj_col, wdraw_col = col_map[hydrogen_storage]
@@ -384,30 +206,6 @@ def filter_gas_terminals(
     selected_zones: list[str],
     gas_terminal: str,
 ) -> pd.DataFrame:
-    """Filter gas terminal rows and select the import capacity column.
-
-    Column index mapping:
-    * ``'Low'``      → column 2
-    * ``'Advanced'`` → column 3
-    * ``'High'``     → column 4
-
-    Values are converted from GWh/day to MW.
-
-    Args:
-        terminals_g_df (pd.DataFrame): Full gas terminal table.
-        selected_zones (list[str]): Zone codes defining the study area.
-        gas_terminal (str): Terminal scenario – one of
-            :data:`~collector.utils.config.GAS_TERMINAL_OPTIONS`.
-
-    Returns:
-        pd.DataFrame: Columns ``Code`` and ``Import`` in MW.
-
-    Raises:
-        ValueError: When *gas_terminal* is not a recognised option.
-
-    Example:
-        >>> filtered = filter_gas_terminals(terminals_g, ["ES00"], "Low")
-    """
     validate_option(gas_terminal, GAS_TERMINAL_OPTIONS, "gas_terminal")
     col_map = {"Low": 2, "Advanced": 3, "High": 4}
     imp_col = col_map[gas_terminal]
@@ -424,31 +222,6 @@ def filter_hydrogen_terminals(
     selected_zones: list[str],
     hydrogen_terminal: str,
 ) -> pd.DataFrame:
-    """Filter hydrogen terminal rows and select the import capacity column.
-
-    Column index mapping (two leading columns, ``Zones`` and ``Code``, then one
-    import-capacity column per scenario):
-    * ``'PCI/PMI'``       → column 2
-    * ``'Advanced'``      → column 3
-    * ``'Less-Advanced'`` → column 4
-
-    Values are converted from GWh/day to MW.
-
-    Args:
-        terminals_h_df (pd.DataFrame): Full hydrogen terminal table.
-        selected_zones (list[str]): Zone codes defining the study area.
-        hydrogen_terminal (str): Terminal scenario – one of
-            :data:`~collector.utils.config.HYDROGEN_TERMINAL_OPTIONS`.
-
-    Returns:
-        pd.DataFrame: Columns ``Code`` and ``Import`` in MW.
-
-    Raises:
-        ValueError: When *hydrogen_terminal* is not a recognised option.
-
-    Example:
-        >>> filtered = filter_hydrogen_terminals(terminals_h, ["ES00"], "PCI/PMI")
-    """
     validate_option(hydrogen_terminal, HYDROGEN_TERMINAL_OPTIONS, "hydrogen_terminal")
     col_map = {"PCI/PMI": 2, "Advanced": 3, "Less-Advanced": 4}
     imp_col = col_map[hydrogen_terminal]
@@ -460,9 +233,7 @@ def filter_hydrogen_terminals(
     return df[["Code", "Import"]]
 
 
-# ---------------------------------------------------------------------------
 # High-level network / storage / terminal assemblers
-# ---------------------------------------------------------------------------
 
 
 def build_network_data(
@@ -475,28 +246,6 @@ def build_network_data(
     hydrogen_pipe: str,
     loss_per_100km: float = DEFAULT_LOSS_PER_100KM,
 ) -> dict[str, np.ndarray]:
-    """Assemble the full network data dict (loss fractions + line capacities).
-
-    Args:
-        node_df (pd.DataFrame): Nodes table with lat/lon columns.
-        edges_e_df (pd.DataFrame): Raw electricity edge table.
-        edges_g_df (pd.DataFrame): Raw gas pipeline edge table.
-        edges_h_df (pd.DataFrame): Raw hydrogen pipeline edge table.
-        selected_zones (list[str]): Study-area zone codes.
-        gas_pipe (str): Gas pipeline capacity scenario.
-        hydrogen_pipe (str): Hydrogen pipeline capacity scenario.
-        loss_per_100km (float): Transmission loss rate (%/100 km).
-
-    Returns:
-        dict[str, np.ndarray]: Keys are ``'Loss Fraction (Electricity)'``,
-            ``'Loss Fraction (Gas)'``, ``'Loss Fraction (Hydrogen)'``,
-            ``'Line Capacity (Electricity)'``, ``'Line Capacity (Gas)'``,
-            and ``'Line Capacity (Hydrogen)'``.  Each value is a numpy array.
-
-    Example:
-        >>> nd = build_network_data(nodes, edges_e, edges_g, edges_h,
-        ...                         ["ES00", "PT00"], "Low", "PCI/PMI")
-    """
     result: dict[str, np.ndarray] = {}
 
     for label, raw_edges in [
@@ -530,22 +279,6 @@ def build_storage_data(
     gas_storage: str,
     hydrogen_storage: str,
 ) -> dict[str, np.ndarray]:
-    """Assemble the storage capacity data dict.
-
-    Args:
-        storages_g_df (pd.DataFrame): Raw gas storage table.
-        storages_h_df (pd.DataFrame): Raw hydrogen storage table.
-        selected_zones (list[str]): Study-area zone codes.
-        gas_storage (str): Gas storage capacity scenario.
-        hydrogen_storage (str): Hydrogen storage capacity scenario.
-
-    Returns:
-        dict[str, np.ndarray]: Keys ``'Storage Capacity (Gas)'`` and
-            ``'Storage Capacity (Hydrogen)'``.
-
-    Example:
-        >>> sd = build_storage_data(sg, sh, ["ES00"], "Low", "PCI/PMI")
-    """
     return {
         "Storage Capacity (Gas)": filter_gas_storages(
             storages_g_df, selected_zones, gas_storage
@@ -561,11 +294,6 @@ def apply_plexos_line_capacities(
     elec_max: dict[tuple[str, str], float],
     h2_max: dict[frozenset, float],
 ) -> dict[str, np.ndarray]:
-    """Data correction: overwrite electricity and hydrogen line capacities with
-    the peak PLEXOS flow on each line (max |flow|), so the modelled network can
-    carry what the market model actually flowed. Capacity arrays are
-    ``[Start, End, Capacity(From), Capacity(To)]``; both directions get the peak.
-    Electricity matches on node codes; hydrogen matches on country prefixes."""
     e = network_df.get("Line Capacity (Electricity)")
     if e is not None and len(e):
         e = np.array(e, dtype=object)
@@ -598,22 +326,6 @@ def build_terminal_data(
     gas_terminal: str,
     hydrogen_terminal: str,
 ) -> dict[str, np.ndarray]:
-    """Assemble the terminal import capacity data dict.
-
-    Args:
-        terminals_g_df (pd.DataFrame): Raw gas terminal table.
-        terminals_h_df (pd.DataFrame): Raw hydrogen terminal table.
-        selected_zones (list[str]): Study-area zone codes.
-        gas_terminal (str): Gas terminal capacity scenario.
-        hydrogen_terminal (str): Hydrogen terminal capacity scenario.
-
-    Returns:
-        dict[str, np.ndarray]: Keys ``'Terminal (Gas)'`` and
-            ``'Terminal (Hydrogen)'``.
-
-    Example:
-        >>> td = build_terminal_data(tg, th, ["ES00"], "Low", "PCI/PMI")
-    """
     return {
         "Terminal (Gas)": filter_gas_terminals(
             terminals_g_df, selected_zones, gas_terminal
@@ -624,33 +336,13 @@ def build_terminal_data(
     }
 
 
-# ---------------------------------------------------------------------------
 # Profile normalisation
-# ---------------------------------------------------------------------------
 
 
 def normalise_profiles_to_hourly(
     profiles_df: dict[str, list[dict]],
     selected_hours: int,
 ) -> dict[str, list[dict]]:
-    """Expand all non-hourly profile entries to *selected_hours* resolution.
-
-    Iterates over every entry in *profiles_df*; when the ``Data`` array has
-    length != *selected_hours*, it is passed through
-    :func:`~collector.utils.helpers.expand_profile_to_hourly` before being
-    written back.  The original dict is mutated in place and also returned.
-
-    Args:
-        profiles_df (dict[str, list[dict]]): Profiles dict as returned by the
-            loader functions.  Modified in place.
-        selected_hours (int): Required hourly series length.
-
-    Returns:
-        dict[str, list[dict]]: The same dict with all arrays normalised.
-
-    Example:
-        >>> normalise_profiles_to_hourly(profiles, 8736)
-    """
     for profile_type, profile_list in profiles_df.items():
         for entry in profile_list:
             data = entry.get("Data")

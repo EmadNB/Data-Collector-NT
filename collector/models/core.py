@@ -1,5 +1,3 @@
-"""Data aggregation and export functions for the ENTSO-E collector pipeline."""
-
 from __future__ import annotations
 
 import os
@@ -16,8 +14,6 @@ from collector.models.opentepes import (
 from collector.utils.config import TECH_COLUMNS, build_tech_columns
 from collector.utils.helpers import expand_profile_to_hourly
 
-# Mapping from technology capacity column name -> commodity price key
-# (used to add "Fuel (EUR/MWh)" column to Normal mode output)
 _TECH_COL_FUEL_KEY: dict[str, str] = {
     "Nuclear (MW)":              "Nuclear",
     "Hard Coal (old1) (MW)":     "Hard_coal",
@@ -50,35 +46,13 @@ _TECH_COL_FUEL_KEY: dict[str, str] = {
 }
 
 
-# ---------------------------------------------------------------------------
 # Availability summary
-# ---------------------------------------------------------------------------
 
 
 def build_availability_summary(
     profiles_df: dict[str, list[dict]],
     node_df: pd.DataFrame,
 ) -> pd.DataFrame:
-    """Build a profile-availability matrix (zones × profile types).
-
-    A cell is ``'Available'`` when the corresponding data array contains at
-    least one non-zero, non-NaN value; otherwise ``'No Data'``.
-
-    Args:
-        profiles_df (dict[str, list[dict]]): Combined profiles dict as returned
-            by :func:`~collector.data.loader.load_all_profiles`.
-        node_df (pd.DataFrame): Nodes table with ``Code`` and ``Location``
-            columns (used to enrich row labels).
-
-    Returns:
-        pd.DataFrame: Transposed availability matrix with profile types as rows
-            and zone codes (with country names) as columns.
-
-    Example:
-        >>> summary = build_availability_summary(profiles, nodes)
-        >>> summary.shape
-        (16, 3)
-    """
     code_to_country: dict[str, str] = {}
     if isinstance(node_df, pd.DataFrame) and {"Code", "Location"}.issubset(node_df.columns):
         code_to_country = {str(r["Code"]): str(r["Location"]) for _, r in node_df.iterrows()}
@@ -106,9 +80,7 @@ def build_availability_summary(
     return df.transpose()
 
 
-# ---------------------------------------------------------------------------
 # Per-zone Excel export
-# ---------------------------------------------------------------------------
 
 
 def export_zone_data(
@@ -125,37 +97,6 @@ def export_zone_data(
     commodity_prices: dict[str, float] | None = None,
     lignite_groups: dict[str, str] | None = None,
 ) -> None:
-    """Write all data for a single zone to a multi-sheet Excel workbook.
-
-    Sheets written:
-
-    * ``Technology Capacities`` – MW capacity table (Parameter / Value).
-    * ``Storage Capacities``    – MWh capacity table.
-    * ``Reserve Requirements``  – FCR/FRR values.
-    * ``Hourly Profiles``       – time-series profiles + cross-border flows.
-    * ``Technology Characteristics`` – per-tech unit parameters.
-    * ``Gas & Hydrogen Assets`` – storage and terminal capacities.
-
-    Args:
-        zone_name (str): Zone code (e.g. ``'ES00'``).
-        tech_cap_df (pd.DataFrame): Technology capacity DataFrame.
-        tech_char_df (pd.DataFrame): Technology characteristics DataFrame.
-        reserve_req_df (pd.DataFrame): Reserve requirements DataFrame.
-        profiles_df (dict[str, list[dict]]): Combined profiles dict.
-        export_df (pd.DataFrame): Cross-border exchange flows DataFrame.
-        storage_df (dict[str, np.ndarray]): Storage capacity arrays.
-        terminal_df (dict[str, np.ndarray]): Terminal import capacity arrays.
-        selected_hours (int): Hourly series length used for padding.
-        output_folder (str): Folder where ``<zone_name>.xlsx`` is written.
-
-    Returns:
-        None
-
-    Example:
-        >>> export_zone_data("ES00", cap_df, char_df, res_df,
-        ...                  profiles, exports, storage, terminals,
-        ...                  8736, "Outputs/Excel Files/Normal")
-    """
     os.makedirs(output_folder, exist_ok=True)
 
     mw_cols   = [c for c in tech_cap_df.columns if "(MW)" in c]
@@ -173,12 +114,10 @@ def export_zone_data(
 
     df_mw  = zone_df[id_col + mw_cols].T.reset_index()
     df_mw.columns  = ["Parameter", "Value"]
-    # Remove zero-capacity DSR / Other Non-RES entries from Technology Capacities sheet
     _multi_zero = df_mw["Parameter"].str.startswith(("DSR", "Other Non-RES"), na=False) & (
         pd.to_numeric(df_mw["Value"], errors="coerce").fillna(0) == 0
     )
     df_mw = df_mw[~_multi_zero]
-    # If only one DSR / Other Non-RES type is present, relabel "<x>1" → "<x>"
     _single_dsr = df_mw["Parameter"].str.startswith("DSR", na=False).sum() == 1
     _single_onr = df_mw["Parameter"].str.startswith("Other Non-RES", na=False).sum() == 1
     if _single_dsr:
@@ -211,17 +150,12 @@ def export_zone_data(
     else:
         hourly_out = pd.DataFrame()
 
-    # Merge in cross-border exports. Match "Exports_<zone>" followed by "_" (a
-    # per-neighbour column) or " " (the aggregated H2Exports_<zone> external
-    # column) so both route to this zone without matching longer zone codes
-    # (e.g. PL00 must not catch PL00E).
     export_cols = export_df.filter(
         regex=rf"Exports_{re.escape(zone_name)}(_| )", axis=1
     ).copy()
     export_cols.index = export_cols.index + 1
     merged = hourly_out.merge(export_cols, left_index=True, right_index=True, how="outer")
 
-    # Add each profile type as a column
     for profile_type, profile_list in profiles_df.items():
         for entry in profile_list:
             if entry["Code"] != zone_name:
@@ -234,12 +168,6 @@ def export_zone_data(
 
     merged = merged.fillna(0)
 
-    # Solar fallback: when a solar/CSP type has capacity but its own profile is
-    # missing/all-zero, reuse a paired solar profile (already loaded for the
-    # same zone & period) instead of leaving that capacity with zero output.
-    # Mirrors the fallback used in the openTEPES export path (opentepes.py's
-    # _SOLAR_FALLBACK). Processed in this order so a fixed-up "Solar Profile"
-    # is available for the rooftop fallback that follows it.
     _SOLAR_FALLBACK_PAIRS = [
         ("Solar (MW)",                        "Solar Profile",             "Solar_Utility Profile"),
         ("Solar (rooftop) (MW)",              "Solar_Rooftop Profile",     "Solar Profile"),
@@ -290,7 +218,6 @@ def export_zone_data(
                  if str(c).startswith("DSR") and str(c).endswith("(MW)"))
     tech_char_excel = _build_tech_char_excel(tech_char_df, zone_name, _n_dsr)
 
-    # Drop DSR / Other Non-RES rows where the installed capacity is zero or absent
     if not tech_char_excel.empty:
         rows_to_drop = []
         for _rt in list(tech_char_excel.index):
@@ -317,7 +244,6 @@ def export_zone_data(
         if _single_onr:
             tech_char_excel = tech_char_excel.rename(index={"Other Non-RES1 (MW)": "Other Non-RES (MW)"})
 
-    # Inject "Fuel (EUR/MWh)" column from TYNDP commodity prices
     if commodity_prices and not tech_char_excel.empty:
         country = zone_name.rstrip("0123456789")
         lignite_key = (lignite_groups or {}).get(country, "Lignite_G2")
@@ -329,9 +255,6 @@ def export_zone_data(
                 commodity_prices.get(fuel_key, 0.0) if fuel_key else 0.0
             )
 
-    # Start-up Cost = fix cost (wear) + warm-start fuel consumption (Net
-    # GJ/MW.start -> MWh via /3.6) x the zone's commodity fuel price. Replaces
-    # the two raw intermediate columns with a single combined figure.
     if not tech_char_excel.empty:
         def _numeric_col(name: str) -> pd.Series:
             if name in tech_char_excel.columns:
@@ -367,7 +290,6 @@ def export_zone_data(
 
 
 def _extract_array_values(cell: object) -> list:
-    """Extract a flat list of floats from a cell that may contain an array."""
     if isinstance(cell, (list, np.ndarray)):
         raw = list(cell)
     elif isinstance(cell, str):
@@ -394,15 +316,12 @@ def _extract_array_values(cell: object) -> list:
 
 def _build_tech_char_excel(tech_char_df: pd.DataFrame, zone_name: str,
                            n_dsr: int) -> pd.DataFrame:
-    """Convert the technology characteristics row for *zone_name* to a 2-D DataFrame."""
     matches = tech_char_df[tech_char_df["Code"] == zone_name]
     if matches.empty:
         return pd.DataFrame()
 
     idx = matches.index[0]
     out = pd.DataFrame()
-    # Char rows are labelled positionally, so match the DSR count used to build
-    # the char arrays (Other Non-RES is fixed at 27).
     tech_label_cols = build_tech_columns(n_dsr)[1:]
 
     for col in tech_char_df.columns[1:]:
@@ -413,8 +332,6 @@ def _build_tech_char_excel(tech_char_df: pd.DataFrame, zone_name: str,
                 out.loc[row_title, col] = ", ".join(map(str, value))
             else:
                 if col == "Efficiency (%)" and isinstance(value, (int, float)):
-                    # Electrolysers with a blank/zero source efficiency default to
-                    # 68% (matching the openTEPES ProductionFunctionH2 fallback).
                     if row_title == "Electrolyser (MW)" and (pd.isna(value) or value <= 0):
                         value = _DEFAULT_ELECTROLYSER_EFF
                     value = value * 100
@@ -429,7 +346,6 @@ def _build_assets_df(
     storage_df: dict[str, np.ndarray],
     terminal_df: dict[str, np.ndarray],
 ) -> pd.DataFrame:
-    """Build the Gas & Hydrogen assets summary table for *zone_name*."""
     def _val(arr: np.ndarray | None, col_idx: int) -> float:
         if arr is None or len(arr) == 0:
             return 0.0
@@ -464,14 +380,9 @@ def _build_assets_df(
     })
 
 
-# ---------------------------------------------------------------------------
 # Network Excel export
-# ---------------------------------------------------------------------------
 
 
-# Capacity (MW) of the virtual intra-country H2 links in Networks.xlsx — the
-# high-capacity placeholder that lets H2 flow freely within a country (mirrors
-# the openTEPES intra-country link value of 200, expressed on the Normal MW scale).
 _H2_INTRA_CAP_MW = 200000.0
 
 
@@ -481,25 +392,6 @@ def export_network_data(
     commodity_prices: dict[str, float] | None = None,
     selected_zones: list[str] | None = None,
 ) -> None:
-    """Write loss fractions and line capacities for all carriers to ``Networks.xlsx``.
-
-    Columns for loss fractions: ``From``, ``To``, ``Length (km)``,
-    ``Loss Fraction (%)``.
-
-    Columns for line capacities: ``From``, ``To``,
-    ``From-To Capacity (MW)``, ``To-From Capacity (MW)``.
-
-    Args:
-        network_df (dict[str, np.ndarray]): Network data as returned by
-            :func:`~collector.processing.transforms.build_network_data`.
-        output_folder (str): Folder where ``Networks.xlsx`` is written.
-
-    Returns:
-        None
-
-    Example:
-        >>> export_network_data(network_df, "Outputs/Excel Files/Normal")
-    """
     os.makedirs(output_folder, exist_ok=True)
     loss_cols = ["From", "To", "Length (km)", "Loss Fraction (%)"]
     cap_cols  = ["From", "To", "From-To Capacity (MW)", "To-From Capacity (MW)"]
@@ -521,10 +413,6 @@ def export_network_data(
                                 ("Hydrogen",    "Hydrogen Pipelines")]:
             loss_df = _to_df(f"Loss Fraction ({carrier})",   loss_cols)
             cap_df  = _to_df(f"Line Capacity ({carrier})",   cap_cols)
-            # Add the virtual intra-country H2 links (main zone -> the country's
-            # other selected zones) to both the loss (first) and capacity (second)
-            # tables, mirroring the openTEPES hydrogen network. They are internal
-            # links, so length and loss are zero.
             if carrier == "Hydrogen" and selected_zones:
                 rep_map = h2_main_zones(network_df, selected_zones)
                 pairs = h2_intra_country_pairs(rep_map, selected_zones)
@@ -564,9 +452,7 @@ def export_network_data(
     print(f"Exported network data: {out_path}")
 
 
-# ---------------------------------------------------------------------------
 # Convenience: export all zones at once
-# ---------------------------------------------------------------------------
 
 
 def export_all_zones(
@@ -584,39 +470,6 @@ def export_all_zones(
     commodity_prices: dict[str, float] | None = None,
     lignite_groups: dict[str, str] | None = None,
 ) -> None:
-    """Export per-zone Excel workbooks and the shared Networks workbook.
-
-    Iterates over *selected_zones*, calls
-    :func:`export_zone_data` for each, then calls
-    :func:`export_network_data` once.
-
-    Args:
-        tech_cap_df (pd.DataFrame): Technology capacity DataFrame.
-        tech_char_df (pd.DataFrame): Technology characteristics DataFrame.
-        reserve_req_df (pd.DataFrame): Reserve requirements DataFrame.
-        profiles_df (dict[str, list[dict]]): Combined profiles dict.
-        export_df (pd.DataFrame): Cross-border exchange flows.
-        storage_df (dict[str, np.ndarray]): Storage capacity arrays.
-        terminal_df (dict[str, np.ndarray]): Terminal import capacity arrays.
-        network_df (dict[str, np.ndarray]): Network loss and capacity arrays.
-        selected_hours (int): Hourly series length.
-        selected_zones (list[str]): Zone codes to export.
-        output_folder (str): Root output folder (e.g.
-            ``'Outputs/Excel Files/Normal'``).
-
-    Returns:
-        None
-
-    Example:
-        >>> export_all_zones(cap_df, char_df, res_df, profiles, exports,
-        ...                  storage, terminals, network, 8736,
-        ...                  ["ES00", "PT00"], "Outputs/Excel Files/Normal")
-    """
-    # Hydrogen demand is a country-level total tied to the country's single H2
-    # node, but the loader assigns it to every zone of the country. Keep it only
-    # on the main/representative zone (the Lines_H node, matching the openTEPES
-    # export) and zero the country's other zones so the per-zone workbooks don't
-    # duplicate the national total.
     _h2_main = set(h2_main_zones(network_df, selected_zones).values())
     for _entry in profiles_df.get("Hydrogen Demand Profile", []):
         if str(_entry.get("Code")) not in _h2_main and _entry.get("Data") is not None:

@@ -1,5 +1,3 @@
-"""Utility sub-package: configuration constants and shared helper functions."""
-
 from collector.utils.config import (
     DEFAULT_LOSS_PER_100KM,
     EARTH_RADIUS_KM,
@@ -38,7 +36,6 @@ from collector.utils.helpers import (
 )
 
 __all__ = [
-    # config
     "VALID_SCENARIOS",
     "GAS_PIPE_OPTIONS",
     "HYDROGEN_PIPE_OPTIONS",
@@ -64,7 +61,6 @@ __all__ = [
     "FILEPATH_NETWORKS",
     "FILEPATH_STORAGES",
     "FILEPATH_TERMINALS",
-    # helpers
     "create_output_directories",
     "get_pemmdb_filepath",
     "get_co2_usecols",

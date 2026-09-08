@@ -1,5 +1,3 @@
-"""Package setup for the ENTSO-E data collector."""
-
 from setuptools import find_packages, setup
 
 with open("requirements.txt") as f:

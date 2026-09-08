@@ -1,5 +1,3 @@
-"""Models sub-package: data aggregation and export orchestration."""
-
 from collector.models.core import (
     build_availability_summary,
     export_all_zones,

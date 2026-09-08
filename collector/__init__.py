@@ -1,16 +1,3 @@
-"""ENTSO-E data collector package.
-
-Top-level exports give single-import access to the most commonly used
-functions across all sub-packages.
-
-Usage::
-
-    from collector import load_nodes, load_tech_capacities, plot_capacity_by_technology
-    from collector.data import load_all_profiles
-    from collector.processing import build_network_data
-    from collector.models import export_all_zones
-"""
-
 # Data loaders
 from collector.data.loader import (
     load_all_profiles,
@@ -82,7 +69,6 @@ from collector.utils.helpers import (
 )
 
 __all__ = [
-    # loaders
     "load_nodes",
     "load_network_edges",
     "load_network_storages",
@@ -108,14 +94,12 @@ __all__ = [
     "load_open_ps_flow_profiles",
     "load_closed_ps_flow_profiles",
     "load_all_profiles",
-    # transforms
     "haversine_km",
     "compute_lengths_and_losses",
     "build_network_data",
     "build_storage_data",
     "build_terminal_data",
     "normalise_profiles_to_hourly",
-    # visualisation
     "plot_capacity_by_technology",
     "plot_storage_capacity_by_technology",
     "plot_capacity_by_zone",
@@ -125,12 +109,10 @@ __all__ = [
     "plot_electricity_network_map",
     "plot_gas_network_map",
     "plot_hydrogen_network_map",
-    # export
     "build_availability_summary",
     "export_zone_data",
     "export_network_data",
     "export_all_zones",
-    # utils
     "create_output_directories",
     "get_pemmdb_filepath",
     "build_zone_display_map",

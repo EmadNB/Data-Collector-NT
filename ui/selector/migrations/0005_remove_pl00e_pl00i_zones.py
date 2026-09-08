@@ -1,9 +1,6 @@
 from django.db import migrations
 
 
-# PL00E and PL00I are not real physical nodes — they were synthetic
-# import/export pseudo-zones for Poland that have been removed from the
-# source network data. Delete them from the zone picker too.
 REMOVED_CODES = ["PL00E", "PL00I"]
 
 

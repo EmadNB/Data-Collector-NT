@@ -1,27 +1,3 @@
-"""Orchestrates the full ENTSO-E data collection and export pipeline.
-
-Run directly::
-
-    python -m collector.main
-
-or import and call :func:`run` from another script::
-
-    from collector.main import run
-    run(
-        selected_scenario=2030,
-        selected_climate_year=2009,
-        selected_zones=["ES00", "PT00", "FR00"],
-        selected_hours=8736,
-        selected_gas_pipe="Existing",
-        selected_hydrogen_pipe="PCI/PMI",
-        selected_gas_storage="Low",
-        selected_hydrogen_storage="PCI/PMI",
-        selected_gas_terminal="Low",
-        selected_hydrogen_terminal="PCI/PMI",
-        selected_output="Normal",
-    )
-"""
-
 from __future__ import annotations
 
 import os
@@ -102,50 +78,6 @@ def run(
     selected_data_correction: bool = False,
     base_path: str = ".",
 ) -> None:
-    """Execute the full data collection, processing, visualisation, and export pipeline.
-
-    Mirrors the execution order of the original ``Data Analyzer.ipynb`` notebook,
-    re-implemented as clean, testable function calls.
-
-    Args:
-        selected_scenario (int): Scenario year.  One of ``2030``, ``2040``,
-            ``2050``.  Defaults to ``2030``.
-        selected_climate_year (int): Climate year for which profile data is
-            extracted (e.g. ``2009``).  Defaults to ``2009``.
-        selected_zones (list[str] | None): Zone codes to collect data for
-            (e.g. ``["ES00", "PT00", "FR00"]``).  Required — a ``ValueError`` is
-            raised (nothing is generated) when empty or ``None``.
-        selected_hours (int): Number of hourly time steps per year to read.
-            Defaults to ``8736``.
-        selected_gas_pipe (str): Gas pipeline capacity scenario.  One of
-            :data:`~collector.utils.config.GAS_PIPE_OPTIONS`.
-        selected_hydrogen_pipe (str): Hydrogen pipeline capacity scenario.
-            One of :data:`~collector.utils.config.HYDROGEN_PIPE_OPTIONS`.
-        selected_gas_storage (str): Gas storage capacity scenario.  One of
-            :data:`~collector.utils.config.GAS_STORAGE_OPTIONS`.
-        selected_hydrogen_storage (str): Hydrogen storage capacity scenario.
-            One of :data:`~collector.utils.config.HYDROGEN_STORAGE_OPTIONS`.
-        selected_gas_terminal (str): Gas terminal capacity scenario.  One of
-            :data:`~collector.utils.config.GAS_TERMINAL_OPTIONS`.
-        selected_hydrogen_terminal (str): Hydrogen terminal capacity scenario.
-            One of :data:`~collector.utils.config.HYDROGEN_TERMINAL_OPTIONS`.
-        selected_output (str): Output format – ``'Normal'`` or
-            ``'openTEPES'``.  Defaults to ``'Normal'``.
-        selected_generate_html (bool): Whether to render the HTML chart / map
-            visualisations.  Defaults to ``False`` (no HTML output).
-        base_path (str): Working directory containing the ``Data/`` folder
-            and where ``Outputs/`` will be created.  Defaults to ``'.'``.
-
-    Returns:
-        None
-
-    Raises:
-        ValueError: When any selector argument is invalid.
-
-    Example:
-        >>> from collector.main import run
-        >>> run(selected_scenario=2030, selected_zones=["ES00", "PT00"])
-    """
     if not selected_zones:
         raise ValueError("No zones selected — nothing to generate.")
 
@@ -199,25 +131,23 @@ def _pipeline(
     generate_html: bool = False,
     data_correction: bool = False,
 ) -> None:
-    """Internal pipeline implementation (all paths relative to cwd)."""
 
-    # Start each run with a clean workbook cache so edited inputs are re-read.
     clear_excel_cache()
 
-    # ── Step 1: directories ──────────────────────────────────────────────────
+    # Step 1: directories
     create_output_directories(".")
     clear_output_files(".", output_mode)
     html_dir   = os.path.join("outputs", "HTMLs")
     excel_dir  = os.path.join("outputs", "Excel Files", output_mode)
 
-    # ── Step 2: node / network loading ──────────────────────────────────────
+    # Step 2: node / network loading
     print("\n=== Loading nodes and network edges ===")
     node_df = load_nodes()
     edges_e, edges_g, edges_h = load_network_edges(scenario)
     storages_g, storages_h  = load_network_storages(scenario)
     terminals_g, terminals_h = load_network_terminals(scenario)
 
-    # ── Step 3: technology data ──────────────────────────────────────────────
+    # Step 3: technology data
     print("\n=== Loading technology capacities ===")
     tech_cap_df  = load_tech_capacities(node_df, zones, scenario, hours, climate_year)
     print("\n=== Loading technology characteristics ===")
@@ -225,7 +155,7 @@ def _pipeline(
     print("\n=== Loading reserve requirements ===")
     reserve_df   = load_reserve_requirements(node_df, zones, scenario)
 
-    # ── Step 4: network transforms ───────────────────────────────────────────
+    # Step 4: network transforms
     print("\n=== Processing network data ===")
     network_df = build_network_data(
         node_df, edges_e, edges_g, edges_h, zones,
@@ -234,8 +164,6 @@ def _pipeline(
     storage_df  = build_storage_data(storages_g, storages_h, zones, gas_storage, hydrogen_storage)
     terminal_df = build_terminal_data(terminals_g, terminals_h, zones, gas_terminal, hydrogen_terminal)
 
-    # Data correction: replace electricity & hydrogen line capacities with the
-    # peak PLEXOS flow on each line (so flow <= capacity holds).
     if data_correction:
         print("\n=== Data correction: overriding line capacities from PLEXOS flows ===")
         try:
@@ -244,7 +172,7 @@ def _pipeline(
         except FileNotFoundError as exc:
             print(f"Warning: PLEXOS result file not found, skipping capacity correction – {exc}")
 
-    # ── Step 5: cross-border exchanges ───────────────────────────────────────
+    # Step 5: cross-border exchanges
     print("\n=== Loading cross-border exchanges ===")
     filtered_e = filter_electricity_edges(edges_e, zones)
     try:
@@ -254,8 +182,6 @@ def _pipeline(
         import pandas as pd
         export_df = pd.DataFrame()
 
-    # Hydrogen cross-border exchanges: attach each country's flows to its main
-    # H2 zone (the Lines_H node, as used for H2 demand), as H2Exports_* columns.
     try:
         import pandas as pd
         h2_export_df = load_crossborder_h2_exchanges(
@@ -266,13 +192,11 @@ def _pipeline(
     except FileNotFoundError as exc:
         print(f"Warning: hydrogen cross-border exchange file not found – {exc}")
 
-    # ── Step 6: profiles ─────────────────────────────────────────────────────
+    # Step 6: profiles
     print("\n=== Loading generation and demand profiles ===")
     profiles_df = load_all_profiles(node_df, zones, scenario, climate_year, hours)
     profiles_df = normalise_profiles_to_hourly(profiles_df, hours)
 
-    # Data correction: replace the H2 demand profile with the PLEXOS "Demand"
-    # values from the market-model results (instead of the NT_<year>.xlsx profile).
     if data_correction:
         print("\n=== Data correction: overriding H2 demand from PLEXOS results ===")
         try:
@@ -281,13 +205,6 @@ def _pipeline(
         except FileNotFoundError as exc:
             print(f"Warning: PLEXOS result file not found, skipping H2 demand correction – {exc}")
 
-    # Data correction: derive offshore wind hourly capacity factor from PLEXOS
-    # results (Wind Offshore generation / installed capacity) instead of the
-    # PECD profile, for any zone with installed offshore wind capacity whose
-    # PECD-derived profile came back all zero (missing file, edition-name
-    # mismatch, etc.). Detected dynamically each run — no fixed zone list —
-    # since which zones/years are affected varies (e.g. a PECD file missing
-    # for one scenario year can be present for another).
     if data_correction:
         wind_offshore = profiles_df.setdefault("Wind_Offshore Profile", [])
         wind_offshore_by_zone = {e["Code"]: e for e in wind_offshore}
@@ -309,13 +226,11 @@ def _pipeline(
             except FileNotFoundError as exc:
                 print(f"Warning: PLEXOS result file not found, skipping offshore wind CF correction – {exc}")
 
-    # Load TYNDP 2024 commodity prices and Lignite country groups
     commodity_prices = load_commodity_prices(scenario)
     lignite_groups   = load_lignite_groups()
 
-    # ── Steps 7–10: HTML visualisations (optional) ──────────────────────────
+    # Steps 7–10: HTML visualisations (optional)
     if generate_html:
-        # Step 7: capacity visualisations
         print("\n=== Plotting capacity charts ===")
         zone_to_display = build_zone_display_map(node_df, zones)
         plot_capacity_by_technology(
@@ -357,7 +272,7 @@ def _pipeline(
     else:
         print("\n=== Skipping HTML visualisations (disabled) ===")
 
-    # ── Step 11: Export ──────────────────────────────────────────────────────
+    # Step 11: Export
     if output_mode == "openTEPES":
         print("\n=== Exporting openTEPES CSV files ===")
         export_opentepes(

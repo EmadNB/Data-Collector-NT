@@ -1,5 +1,3 @@
-"""Data sub-package: loading functions for ENTSO-E PEMMDB, PECD, and network files."""
-
 from collector.data.loader import (
     load_all_profiles,
     load_closed_ps_flow_profiles,

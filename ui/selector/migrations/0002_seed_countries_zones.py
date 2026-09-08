@@ -5,8 +5,6 @@ def seed(apps, schema_editor):
     Country = apps.get_model("selector", "Country")
     Zone = apps.get_model("selector", "Zone")
 
-    # Name -> ISO3 mapping for the GeoJSON map dataset (feature.id).
-    # Kept explicit to avoid ambiguity (e.g., "Macedonia" vs "North Macedonia").
     name_to_iso3 = {
         "Albania": "ALB",
         "Austria": "AUT",
@@ -57,7 +55,6 @@ def seed(apps, schema_editor):
         "Belarus": "BLR",
     }
 
-    # (zone_code, country_name)
     zone_rows = [
         ("AL00", "Albania"),
         ("AT00", "Austria"),
@@ -136,17 +133,14 @@ def seed(apps, schema_editor):
         ("BY00", "Belarus"),
     ]
 
-    # Create / upsert countries, then zones.
     countries_by_name = {}
     for _, cname in zone_rows:
         if cname in countries_by_name:
             continue
         iso3 = name_to_iso3.get(cname)
         if not iso3:
-            # Skip unknown mapping rather than failing migrations.
             continue
         country, _ = Country.objects.get_or_create(iso3=iso3, defaults={"name": cname})
-        # If name ever changes, keep DB in sync.
         if country.name != cname:
             country.name = cname
             country.save(update_fields=["name"])
@@ -181,4 +175,3 @@ class Migration(migrations.Migration):
     operations = [
         migrations.RunPython(seed, reverse_code=unseed),
     ]
-

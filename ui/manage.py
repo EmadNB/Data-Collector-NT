@@ -2,7 +2,6 @@ import os
 import sys
 from pathlib import Path
 
-# Make the collector package importable without a pip install
 _PROJECT_ROOT = str(Path(__file__).resolve().parent.parent)
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
@@ -23,4 +22,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

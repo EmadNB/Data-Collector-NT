@@ -2,9 +2,6 @@ from django.db import models
 
 
 class Country(models.Model):
-    """
-    ISO3 matches the GeoJSON dataset used in the UI (feature.id).
-    """
 
     iso3 = models.CharField(max_length=3, unique=True)
     iso2 = models.CharField(max_length=2, unique=True, null=True, blank=True)
@@ -26,4 +23,3 @@ class Zone(models.Model):
 
     def __str__(self) -> str:
         return self.code
-

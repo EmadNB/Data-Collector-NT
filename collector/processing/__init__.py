@@ -1,5 +1,3 @@
-"""Processing sub-package: network transforms, profile normalisation, and filtering."""
-
 from collector.processing.transforms import (
     build_network_data,
     build_storage_data,

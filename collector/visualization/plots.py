@@ -1,5 +1,3 @@
-"""Plotting and visualisation functions (Bokeh charts + Folium maps)."""
-
 from __future__ import annotations
 
 import os
@@ -20,19 +18,15 @@ from branca.element import MacroElement, Template
 from collector.utils.helpers import build_zone_display_map, expand_profile_to_hourly
 
 
-# ---------------------------------------------------------------------------
 # Internal helpers
-# ---------------------------------------------------------------------------
 
 
 def _zone_palette(n: int) -> list[str]:
-    """Return a colour palette of length *n* from the Bokeh Category sets."""
     palette = Category10[10] if n <= 10 else Category20[20]
     return [palette[i % len(palette)] for i in range(n)]
 
 
 def _apply_font(p, font_factor: float = 1.0) -> None:
-    """Apply consistent font sizes to a Bokeh figure."""
     p.title.text_font_size        = f"{font_factor * 13}pt"
     p.xaxis.axis_label_text_font_size = f"{font_factor * 11}pt"
     p.yaxis.axis_label_text_font_size = f"{font_factor * 11}pt"
@@ -42,7 +36,6 @@ def _apply_font(p, font_factor: float = 1.0) -> None:
 
 
 def _bar_offsets(n: int, total_width: float = 0.85) -> tuple[float, list[float]]:
-    """Compute bar width and dodge offsets for a grouped bar chart."""
     bar_w = max(0.05, total_width / max(1, n))
     if n == 1:
         return bar_w, [0.0]
@@ -51,9 +44,7 @@ def _bar_offsets(n: int, total_width: float = 0.85) -> tuple[float, list[float]]
     return bar_w, offsets
 
 
-# ---------------------------------------------------------------------------
 # Capacity bar charts
-# ---------------------------------------------------------------------------
 
 
 def plot_capacity_by_technology(
@@ -62,26 +53,6 @@ def plot_capacity_by_technology(
     zone_to_display: dict[str, str],
     output_path: str,
 ) -> None:
-    """Save a grouped bar chart of installed capacity by technology for each zone.
-
-    One bar group per technology; one bar per zone.  Only MW columns (not MWh
-    or MW/h time-series) are included.
-
-    Args:
-        tech_cap_df (pd.DataFrame): Technology capacity DataFrame as returned
-            by :func:`~collector.data.loader.load_tech_capacities`.
-        selected_zones (list[str]): Zone codes to plot.
-        zone_to_display (dict[str, str]): Mapping from zone code to display
-            label (built by :func:`~collector.utils.helpers.build_zone_display_map`).
-        output_path (str): Destination path for the HTML output file.
-
-    Returns:
-        None
-
-    Example:
-        >>> plot_capacity_by_technology(cap_df, ["ES00"], {"ES00": "Spain (ES00)"},
-        ...                             "Outputs/HTMLs/cap_by_tech.html")
-    """
     exclude = [c for c in tech_cap_df.columns if c.endswith("(MWh)") or c.endswith("(MW/h)")]
     techs = [c for c in tech_cap_df.columns if c != "Code" and c not in exclude]
     dfz = tech_cap_df[tech_cap_df["Code"].isin(selected_zones)].copy()
@@ -129,23 +100,6 @@ def plot_storage_capacity_by_technology(
     zone_to_display: dict[str, str],
     output_path: str,
 ) -> None:
-    """Save a grouped bar chart of MWh storage capacity by technology for each zone.
-
-    Only MWh columns (not MW or MW/h time-series) are included.
-
-    Args:
-        tech_cap_df (pd.DataFrame): Technology capacity DataFrame.
-        selected_zones (list[str]): Zone codes to plot.
-        zone_to_display (dict[str, str]): Zone display label mapping.
-        output_path (str): Destination HTML path.
-
-    Returns:
-        None
-
-    Example:
-        >>> plot_storage_capacity_by_technology(cap_df, ["ES00"], labels,
-        ...                                     "Outputs/HTMLs/storage_by_tech.html")
-    """
     ex_techs = [c for c in tech_cap_df.columns if c.endswith("(MWh)")]
     if not ex_techs:
         return
@@ -195,23 +149,6 @@ def plot_capacity_by_zone(
     zone_to_display: dict[str, str],
     output_path: str,
 ) -> None:
-    """Save a grouped bar chart of installed capacity by zone for each technology.
-
-    One bar group per zone; one bar per technology.
-
-    Args:
-        tech_cap_df (pd.DataFrame): Technology capacity DataFrame.
-        selected_zones (list[str]): Zone codes to plot.
-        zone_to_display (dict[str, str]): Zone display label mapping.
-        output_path (str): Destination HTML path.
-
-    Returns:
-        None
-
-    Example:
-        >>> plot_capacity_by_zone(cap_df, ["ES00", "PT00"], labels,
-        ...                       "Outputs/HTMLs/cap_by_zone.html")
-    """
     exclude = [c for c in tech_cap_df.columns if c.endswith("(MWh)") or c.endswith("(MW/h)")]
     techs = [c for c in tech_cap_df.columns if c != "Code" and c not in exclude]
     dfz = tech_cap_df[tech_cap_df["Code"].isin(selected_zones)].copy()
@@ -268,21 +205,6 @@ def plot_storage_capacity_by_zone(
     zone_to_display: dict[str, str],
     output_path: str,
 ) -> None:
-    """Save a grouped bar chart of MWh storage capacity by zone for each technology.
-
-    Args:
-        tech_cap_df (pd.DataFrame): Technology capacity DataFrame.
-        selected_zones (list[str]): Zone codes to plot.
-        zone_to_display (dict[str, str]): Zone display label mapping.
-        output_path (str): Destination HTML path.
-
-    Returns:
-        None
-
-    Example:
-        >>> plot_storage_capacity_by_zone(cap_df, ["ES00"], labels,
-        ...                               "Outputs/HTMLs/storage_by_zone.html")
-    """
     ex_techs = [c for c in tech_cap_df.columns if c.endswith("(MWh)")]
     if not ex_techs:
         return
@@ -333,9 +255,7 @@ def plot_storage_capacity_by_zone(
     bokeh_save(p)
 
 
-# ---------------------------------------------------------------------------
 # Profile time-series plots
-# ---------------------------------------------------------------------------
 
 
 def plot_profiles(
@@ -345,27 +265,6 @@ def plot_profiles(
     selected_hours: int,
     output_dir: str,
 ) -> None:
-    """Save one HTML time-series plot per profile type.
-
-    For each profile type in *profiles_df* a stacked column of line plots is
-    generated – one line per zone – and saved as
-    ``<output_dir>/<profile_type>.html``.
-
-    Args:
-        profiles_df (dict[str, list[dict]]): Profiles as returned by
-            :func:`~collector.data.loader.load_all_profiles`.
-        selected_zones (list[str]): Zone codes to include.
-        node_df (pd.DataFrame): Nodes table used to resolve display names.
-        selected_hours (int): Canonical hourly series length; daily/weekly
-            arrays are expanded automatically.
-        output_dir (str): Folder where HTML files are written.
-
-    Returns:
-        None
-
-    Example:
-        >>> plot_profiles(profiles, ["ES00"], nodes, 8736, "Outputs/HTMLs")
-    """
     profile_types = list(profiles_df.keys())
     palette = Category10[10] if len(profile_types) <= 10 else Category20[20]
     color_map = {pt: palette[i % len(palette)] for i, pt in enumerate(profile_types)}
@@ -416,9 +315,7 @@ def plot_profiles(
             print(f"No data to plot for profile type '{profile_type}'")
 
 
-# ---------------------------------------------------------------------------
 # Availability report
-# ---------------------------------------------------------------------------
 
 
 def plot_availability_report(
@@ -428,25 +325,6 @@ def plot_availability_report(
     climate_year: int,
     output_path: str,
 ) -> None:
-    """Write a colour-coded HTML availability matrix for all profile types.
-
-    Cells are styled green (``'Available'``) when the data array contains at
-    least one non-zero, non-NaN value, and red (``'No Data'``) otherwise.
-
-    Args:
-        profiles_df (dict[str, list[dict]]): Combined profiles dict.
-        node_df (pd.DataFrame): Nodes table for display name resolution.
-        scenario (int): Scenario year (used in the report title).
-        climate_year (int): Climate year (used in the report title).
-        output_path (str): Full path for the output HTML file.
-
-    Returns:
-        None
-
-    Example:
-        >>> plot_availability_report(profiles, nodes, 2030, 2009,
-        ...                          "Outputs/HTMLs/Report Table.html")
-    """
     code_to_country: dict[str, str] = {}
     if isinstance(node_df, pd.DataFrame) and {"Code", "Location"}.issubset(node_df.columns):
         code_to_country = {str(r["Code"]): str(r["Location"]) for _, r in node_df.iterrows()}
@@ -507,18 +385,14 @@ def plot_availability_report(
         f.write(styled.to_html())
 
 
-# ---------------------------------------------------------------------------
-# Folium network maps (from Map.ipynb)
-# ---------------------------------------------------------------------------
+# Folium network maps
 
 
 def _get_random_hex_color() -> str:
-    """Return a random CSS hex colour string."""
     return "#{:06x}".format(random.randint(0, 0xFFFFFF))
 
 
 def _build_folium_locations(node_df: pd.DataFrame) -> dict[str, list[float]]:
-    """Build a ``{"Country (Code)": [lat, lon]}`` mapping from the nodes table."""
     node_df = node_df.copy()
     if "Location" in node_df.columns:
         node_df["Location"] = node_df["Location"].str.replace("\xa0", " ", regex=False)
@@ -530,7 +404,6 @@ def _build_folium_locations(node_df: pd.DataFrame) -> dict[str, list[float]]:
 
 
 def _add_map_title(m: folium.Map, title_text: str) -> None:
-    """Embed a fixed-position title div into a Folium map."""
     title_html = (
         "{% macro html(this, kwargs) %}"
         f'<div style="position: fixed; top: 10px; left: 50px; font-size: 22px; '
@@ -549,29 +422,6 @@ def plot_electricity_network_map(
     scenario: int,
     geojson_url: str = "https://raw.githubusercontent.com/johan/world.geo.json/master/countries.geo.json",
 ) -> folium.Map:
-    """Build a Folium map of the electricity network for the selected zones.
-
-    Nodes in the study zone are coloured red; neighbouring nodes black.
-    Lines are drawn in red.  A GeoJSON country layer provides geographic
-    context.
-
-    Args:
-        node_df (pd.DataFrame): Nodes table with ``Country``, ``Code``,
-            ``Latitude``, and ``Longitude`` columns.
-        edges_e_df (pd.DataFrame): Electricity edge table for the given
-            scenario (already loaded via
-            :func:`~collector.data.loader.load_network_edges`).
-        selected_zones (list[str]): Zone codes that define the study area.
-        scenario (int): Scenario year (used in the map title).
-        geojson_url (str): URL to a world GeoJSON file for country outlines.
-
-    Returns:
-        folium.Map: Interactive Folium map object.
-
-    Example:
-        >>> m = plot_electricity_network_map(nodes, edges_e, ["ES00", "PT00"], 2030)
-        >>> m.save("electricity_network.html")
-    """
     return _build_network_map(
         node_df=node_df,
         edges_df=edges_e_df,
@@ -589,23 +439,6 @@ def plot_gas_network_map(
     scenario: int,
     geojson_url: str = "https://raw.githubusercontent.com/johan/world.geo.json/master/countries.geo.json",
 ) -> folium.Map:
-    """Build a Folium map of the gas pipeline network for the selected zones.
-
-    Lines are drawn in blue.
-
-    Args:
-        node_df (pd.DataFrame): Nodes table.
-        edges_g_df (pd.DataFrame): Gas pipeline edge table.
-        selected_zones (list[str]): Study-area zone codes.
-        scenario (int): Scenario year (used in title).
-        geojson_url (str): URL to a world GeoJSON file.
-
-    Returns:
-        folium.Map: Interactive Folium map object.
-
-    Example:
-        >>> m = plot_gas_network_map(nodes, edges_g, ["ES00"], 2030)
-    """
     return _build_network_map(
         node_df=node_df,
         edges_df=edges_g_df,
@@ -623,23 +456,6 @@ def plot_hydrogen_network_map(
     scenario: int,
     geojson_url: str = "https://raw.githubusercontent.com/johan/world.geo.json/master/countries.geo.json",
 ) -> folium.Map:
-    """Build a Folium map of the hydrogen pipeline network for the selected zones.
-
-    Lines are drawn in green.
-
-    Args:
-        node_df (pd.DataFrame): Nodes table.
-        edges_h_df (pd.DataFrame): Hydrogen pipeline edge table.
-        selected_zones (list[str]): Study-area zone codes.
-        scenario (int): Scenario year (used in title).
-        geojson_url (str): URL to a world GeoJSON file.
-
-    Returns:
-        folium.Map: Interactive Folium map object.
-
-    Example:
-        >>> m = plot_hydrogen_network_map(nodes, edges_h, ["ES00"], 2030)
-    """
     return _build_network_map(
         node_df=node_df,
         edges_df=edges_h_df,
@@ -658,7 +474,6 @@ def _build_network_map(
     line_color: str,
     geojson_url: str,
 ) -> folium.Map:
-    """Internal builder shared by all three network map functions."""
     geojson_data = requests.get(geojson_url, timeout=30).json()
     locations = _build_folium_locations(node_df)
 

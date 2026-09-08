@@ -29,7 +29,6 @@ SESSION_KEY_META = "required_data_meta"
 
 
 class _Tee:
-    """Write to several streams at once (e.g. real stdout + an in-memory log)."""
 
     def __init__(self, *streams: Any) -> None:
         self._streams = streams
@@ -129,7 +128,7 @@ def selection_api(request: HttpRequest) -> JsonResponse:
     except Exception:
         return JsonResponse({"error": "Invalid JSON"}, status=400)
 
-    # ── Meta update: any known meta key present in the payload ───────────────
+    # Meta update: any known meta key present in the payload
     meta_keys_in_payload = set(payload.keys()) & set(_META_VALIDATORS.keys())
     if meta_keys_in_payload:
         meta = _get_meta(request)
@@ -143,7 +142,7 @@ def selection_api(request: HttpRequest) -> JsonResponse:
         _set_meta(request, meta)
         return JsonResponse(_response_payload(request))
 
-    # ── Country / zone update ────────────────────────────────────────────────
+    # Country / zone update
     country = payload.get("country")
     active = payload.get("active")
     zones = payload.get("zones", [])
@@ -169,7 +168,6 @@ def generate(request: HttpRequest) -> HttpResponse:
     selection = _get_countries_selection(request)
     meta = _get_meta(request)
 
-    # Collect flat list of zone codes from all active countries
     selected_zones: list[str] = []
     for entry in selection.values():
         if entry.get("active"):
@@ -181,8 +179,6 @@ def generate(request: HttpRequest) -> HttpResponse:
     def _get(key: str) -> str:
         return meta.get(key, _META_DEFAULTS[key])
 
-    # Capture all print()/stdout+stderr output produced during the run so it can
-    # be saved as Processing.log inside the ZIP (still echoed to the console).
     log_buf = io.StringIO()
     log_buf.write(f"Data Collector — Processing log\n")
     log_buf.write(f"Started: {datetime.now().isoformat(timespec='seconds')}\n")
@@ -217,19 +213,17 @@ def generate(request: HttpRequest) -> HttpResponse:
             sys.stdout, sys.stderr = _old_out, _old_err
     except Exception as exc:
         tb = traceback.format_exc()
-        print(tb, file=sys.stderr)  # full traceback to the server console
+        print(tb, file=sys.stderr)
         return JsonResponse({"error": f"{exc}\n\n{tb}"}, status=500)
 
     log_buf.write("=" * 70 + "\n")
     log_buf.write(f"Finished: {datetime.now().isoformat(timespec='seconds')}\n")
 
-    # Build ZIP: all HTMLs + Excel files for the selected mode only
     outputs_root = os.path.join(settings.COLLECTOR_BASE_PATH, "outputs")
     output_mode  = _get("output_mode")
     zip_sources  = [
         (os.path.join(outputs_root, "Excel Files", output_mode), os.path.join("Excel Files", output_mode)),
     ]
-    # Only include the HTMLs folder when HTML output generation is enabled.
     if _get("generate_html") == "yes":
         zip_sources.insert(0, (os.path.join(outputs_root, "HTMLs"), "HTMLs"))
     buf = io.BytesIO()
@@ -241,7 +235,6 @@ def generate(request: HttpRequest) -> HttpResponse:
                 fpath = os.path.join(src_dir, fname)
                 if os.path.isfile(fpath):
                     zf.write(fpath, os.path.join(arc_prefix, fname))
-        # Processing log at the ZIP root, next to HTMLs and Excel Files
         zf.writestr("Processing.log", log_buf.getvalue())
     buf.seek(0)
 

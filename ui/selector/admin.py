@@ -20,4 +20,3 @@ class ZoneAdmin(admin.ModelAdmin):
     list_display = ("code", "country")
     search_fields = ("code", "country__name", "country__iso3")
     list_select_related = ("country",)
-

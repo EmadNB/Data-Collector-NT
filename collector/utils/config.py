@@ -1,8 +1,4 @@
-"""Constants for the ENTSO-E data collector."""
-
-# ---------------------------------------------------------------------------
 # Scenario / infrastructure options
-# ---------------------------------------------------------------------------
 
 VALID_SCENARIOS = [2030, 2040, 2050]
 
@@ -14,31 +10,20 @@ GAS_TERMINAL_OPTIONS = ["Low", "Advanced", "High"]
 HYDROGEN_TERMINAL_OPTIONS = ["PCI/PMI", "Advanced", "Less-Advanced"]
 OUTPUT_MODES = ["Normal", "openTEPES"]
 
-# ---------------------------------------------------------------------------
 # Physical constants
-# ---------------------------------------------------------------------------
 
 EARTH_RADIUS_KM: float = 6371.0088
 DEFAULT_LOSS_PER_100KM: float = 0.3
 
-# Gas / hydrogen unit conversion: GWh/day → MW  (× 1000 / 24)
 GAS_UNIT_FACTOR: float = 1000.0 / 24.0
 
-# ---------------------------------------------------------------------------
 # Column definitions
-# ---------------------------------------------------------------------------
 
-# DSR and Other Non-RES have a variable number of type columns on their PEMMDB
-# sheets (DSR: 11 for most zones, 19 for DE00; Other Non-RES: uniformly 27). The
-# DSR count is detected per run (max across the selected zones); Other Non-RES is
-# fixed. build_tech_columns() produces the capacity DataFrame column order for a
-# given DSR count so the loader, Normal export, and openTEPES stay consistent.
 OTHER_NONRES_COUNT = 27
 DSR_DEFAULT_COUNT = 10
 
 
 def build_tech_columns(n_dsr: int, n_nores: int = OTHER_NONRES_COUNT) -> list[str]:
-    """Return the ``tech_cap_df`` column order for *n_dsr* DSR type columns."""
     return [
         "Code",
         "Nuclear (MW)",
@@ -77,7 +62,6 @@ def build_tech_columns(n_dsr: int, n_nores: int = OTHER_NONRES_COUNT) -> list[st
     ]
 
 
-# Default (used only as a fallback / for imports); the loader rebuilds per run.
 TECH_COLUMNS = build_tech_columns(DSR_DEFAULT_COUNT)
 
 TECH_CHAR_COLUMNS = [
@@ -117,9 +101,7 @@ RESERVE_COLUMNS = [
     "Total (FRR) (MW/h)",
 ]
 
-# ---------------------------------------------------------------------------
 # Profile catalogue
-# ---------------------------------------------------------------------------
 
 PECD_FILE_TEMPLATES: dict[str, dict[int, str]] = {
     "CSP_noStorage Profile": {
@@ -178,7 +160,6 @@ HYDRO_SHEET_NAMES: dict[str, str] = {
     "Closed_PS Flow Energy": "PS Closed - Year Dependent",
 }
 
-# Expected series length per hydro inflow type
 HYDRO_TARGET_LENGTHS: dict[str, int] = {
     "River Flow Energy": 366,
     "Pondage Flow Energy": 366,
@@ -187,13 +168,10 @@ HYDRO_TARGET_LENGTHS: dict[str, int] = {
     "Closed_PS Flow Energy": 53,
 }
 
-# Hydro raw unit is GWh → convert to MWh
 HYDRO_SCALE_FACTOR: float = 1000.0
 
-# Rooftop PV always uses 8760 h regardless of selected_hours
 SOLAR_ROOFTOP_TARGET_LEN: int = 8760
 
-# Common data file paths
 FILEPATH_CO2_FACTORS = "inputs/CO2 emission factors in TYNDP2024 v2.xlsx"
 FILEPATH_COMMON_DATA = "inputs/Common data/Common Data.xlsx"
 FILEPATH_NETWORKS = "inputs/Networks.xlsx"

@@ -1,5 +1,3 @@
-"""Data loading functions for ENTSO-E PEMMDB, PECD, and network files."""
-
 from __future__ import annotations
 
 import glob
@@ -11,32 +9,17 @@ from functools import lru_cache
 import numpy as np
 import pandas as pd
 
-# Other Non-RES has up to 27 type columns (C..AC) on its PEMMDB sheet.
 _OTHER_NONRES_COLS = [get_column_letter(3 + i) for i in range(27)]
 
-# Row-index permutation mapping the "Thermal" sheet's physical thermal-
-# technology row order onto the canonical TECH_COLUMNS order, which places Gas
-# (ccgt_pre1)/(ccgt_pre2) right after Gas (ccgt_old2) (source rows 22, 23 on
-# the "Thermal" sheet). The "CO2 emission factor" and "Common Data" sheets
-# already place ccgt_pre1/pre2 right after ccgt_old2, matching the canonical
-# order, so they need no permutation.
 _THERMAL_SHEET_ROW_ORDER = list(range(13)) + [22, 23] + list(range(13, 22)) + list(range(24, 26))
 
 
 @lru_cache(maxsize=16)
 def _excel(path: str) -> pd.ExcelFile:
-    """Return a cached ``pd.ExcelFile`` for *path*.
-
-    Reading individual cells with ``pd.read_excel(path, ...)`` re-opens and
-    re-parses the whole workbook every call (~65 ms each). Passing a shared
-    ``ExcelFile`` instead unzips/parses the workbook once, making per-cell reads
-    ~7x cheaper. Exceptions (e.g. missing file) are not cached by ``lru_cache``.
-    """
     return pd.ExcelFile(path)
 
 
 def clear_excel_cache() -> None:
-    """Drop cached workbook handles so a fresh run picks up any input changes."""
     _excel.cache_clear()
     _dsr_col_count.cache_clear()
 
@@ -65,12 +48,6 @@ from collector.utils.helpers import get_co2_usecols, get_pemmdb_filepath
 
 @lru_cache(maxsize=256)
 def _dsr_col_count(filepath: str) -> int:
-    """Number of DSR type columns (C..) on a zone's DSR sheet, 0 if unavailable.
-
-    Uses a fresh read-only workbook: reading ``max_column`` from the shared
-    cached ``_excel`` handle is unreliable once its worksheet has been streamed.
-    The integer result is cached so detection happens once per file.
-    """
     try:
         wb = openpyxl.load_workbook(filepath, read_only=True)
         try:
@@ -83,28 +60,15 @@ def _dsr_col_count(filepath: str) -> int:
 
 
 def _dsr_count_for(selected_zones: list[str], scenario: int) -> int:
-    """Max DSR type-column count across *selected_zones* (>= the default 10)."""
     counts = [_dsr_col_count(get_pemmdb_filepath(z, scenario)) for z in selected_zones]
     return max(counts + [DSR_DEFAULT_COUNT])
 
 
 def _dsr_cols(n_dsr: int) -> list[str]:
-    """Excel column letters C.. for *n_dsr* DSR type columns."""
     return [get_column_letter(3 + i) for i in range(n_dsr)]
 
 
 def _dsr_climate_year_mask(filepath: str, width: int, climate_year: int | None) -> np.ndarray:
-    """Boolean mask (length *width*) of a zone's DSR type columns applicable to *climate_year*.
-
-    Each DSR type column (C..) on the sheet carries its own "Climate year
-    start" / "Climate year end" pair (rows 13-14): some bands apply to the
-    full climate-year range, others are duplicated per single climate year
-    (e.g. separate columns valid only for 1995, 2008, or 2009). A column is
-    included only when *climate_year* falls within its [start, end] range,
-    inclusive; columns with no bounds default to included. When
-    *climate_year* is unknown or the sheet can't be read, no column is
-    excluded.
-    """
     if width <= 0:
         return np.zeros(0, dtype=bool)
     if climate_year is None:
@@ -125,32 +89,10 @@ def _dsr_climate_year_mask(filepath: str, width: int, climate_year: int | None) 
     return mask
 
 
-# ---------------------------------------------------------------------------
 # Node / network raw loaders
-# ---------------------------------------------------------------------------
 
 
 def load_nodes(filepath: str = FILEPATH_NETWORKS, sheet_name: str = "Nodes") -> pd.DataFrame:
-    """Load the node (zone) reference table from an Excel workbook.
-
-    Args:
-        filepath (str): Path to the Excel file containing the Nodes sheet.
-            Defaults to ``Data/Networks.xlsx``.
-        sheet_name (str): Name of the worksheet to read. Defaults to
-            ``'Nodes'``.
-
-    Returns:
-        pd.DataFrame: DataFrame with at least the columns ``Code``,
-            ``Latitude``, and ``Longitude``.
-
-    Raises:
-        FileNotFoundError: When *filepath* does not exist.
-
-    Example:
-        >>> nodes = load_nodes()
-        >>> list(nodes.columns)[:3]
-        ['Code', 'Latitude', 'Longitude']
-    """
     return pd.read_excel(filepath, sheet_name=sheet_name)
 
 
@@ -158,25 +100,6 @@ def load_network_edges(
     scenario: int,
     filepath: str = FILEPATH_NETWORKS,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    """Load electricity, gas, and hydrogen network edge tables from Excel.
-
-    Args:
-        scenario (int): Scenario year (``2030``, ``2040``, or ``2050``).
-        filepath (str): Path to ``Networks.xlsx``.
-
-    Returns:
-        tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]: Three DataFrames for
-            electricity lines, gas pipelines, and hydrogen pipelines
-            respectively.
-
-    Raises:
-        FileNotFoundError: When *filepath* does not exist.
-
-    Example:
-        >>> edges_e, edges_g, edges_h = load_network_edges(2030)
-    """
-    # Only one electricity network exists, so its sheet is period-independent
-    # (named simply "Lines_E"); gas and hydrogen remain per-scenario.
     edges_e = pd.read_excel(filepath, sheet_name="Lines_E")
     edges_g = pd.read_excel(filepath, sheet_name=f"Lines_G ({scenario})")
     edges_h = pd.read_excel(filepath, sheet_name=f"Lines_H ({scenario})")
@@ -187,22 +110,6 @@ def load_network_storages(
     scenario: int,
     filepath: str = FILEPATH_STORAGES,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Load gas and hydrogen storage capacity tables from Excel.
-
-    Args:
-        scenario (int): Scenario year.
-        filepath (str): Path to ``Storages.xlsx``.
-
-    Returns:
-        tuple[pd.DataFrame, pd.DataFrame]: Gas storages DataFrame and
-            hydrogen storages DataFrame.
-
-    Raises:
-        FileNotFoundError: When *filepath* does not exist.
-
-    Example:
-        >>> storages_g, storages_h = load_network_storages(2030)
-    """
     storages_g = pd.read_excel(filepath, sheet_name=f"Storage_G ({scenario})")
     storages_h = pd.read_excel(filepath, sheet_name=f"Storage_H ({scenario})")
     return storages_g, storages_h
@@ -212,30 +119,12 @@ def load_network_terminals(
     scenario: int,
     filepath: str = FILEPATH_TERMINALS,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Load gas and hydrogen terminal capacity tables from Excel.
-
-    Args:
-        scenario (int): Scenario year.
-        filepath (str): Path to ``Terminals.xlsx``.
-
-    Returns:
-        tuple[pd.DataFrame, pd.DataFrame]: Gas terminals DataFrame and
-            hydrogen terminals DataFrame.
-
-    Raises:
-        FileNotFoundError: When *filepath* does not exist.
-
-    Example:
-        >>> terminals_g, terminals_h = load_network_terminals(2030)
-    """
     terminals_g = pd.read_excel(filepath, sheet_name=f"Terminal_G ({scenario})")
     terminals_h = pd.read_excel(filepath, sheet_name=f"Terminal_H ({scenario})")
     return terminals_g, terminals_h
 
 
-# ---------------------------------------------------------------------------
 # PEMMDB loaders
-# ---------------------------------------------------------------------------
 
 
 def load_tech_capacities(
@@ -245,36 +134,6 @@ def load_tech_capacities(
     selected_hours: int,
     climate_year: int | None = None,
 ) -> pd.DataFrame:
-    """Load installed technology capacity data from PEMMDB Excel files.
-
-    Reads per-technology MW / MWh values and selected hourly time series
-    (exports, DSR, other RES) for every zone in *selected_zones* from the
-    corresponding PEMMDB workbook.  Missing files are handled gracefully by
-    filling zeros for all columns.
-
-    Args:
-        node_df (pd.DataFrame): Nodes table whose ``Code`` column defines
-            the universe of available zone codes.
-        selected_zones (list[str]): Subset of zone codes to collect data for.
-        scenario (int): Scenario year (``2030``, ``2040``, or ``2050``).
-        selected_hours (int): Number of hourly values to read for time-series
-            columns (e.g. ``8736``).
-        climate_year (int | None): Climate year to extract. Each DSR type
-            column carries its own "Climate year start"/"Climate year end"
-            range; only columns whose range includes *climate_year*
-            (inclusive of both bounds) are included, others are zeroed. When
-            ``None``, no DSR column is excluded.
-
-    Returns:
-        pd.DataFrame: One row per zone with columns defined by
-            :data:`~collector.utils.config.TECH_COLUMNS`.
-
-    Example:
-        >>> nodes = load_nodes()
-        >>> cap_df = load_tech_capacities(nodes, ["ES00", "PT00"], 2030, 8736, 2009)
-        >>> "Nuclear (MW)" in cap_df.columns
-        True
-    """
     n_dsr = _dsr_count_for(selected_zones, scenario)
     columns = build_tech_columns(n_dsr)
     tech_rows: list[dict] = []
@@ -300,14 +159,6 @@ def load_tech_capacities(
 
 def _read_scalar(filepath: str, sheet: str, col: str, row: int,
                  default: object = 0.0) -> object:
-    """Read a single cell (sheet/col/row) from an Excel file, safely.
-
-    Returns *default* when the sheet is missing, the column is out of bounds, or
-    the requested row lies beyond the sheet's extent — situations that occur for
-    some countries whose PEMMDB sheets are shorter or narrower than expected.
-    Without this, ``read_excel`` raises ``ParserError`` (out-of-bounds usecols)
-    or ``.iat[0, 0]`` raises ``IndexError`` on an empty frame.
-    """
     try:
         df = pd.read_excel(
             _excel(filepath), sheet_name=sheet, usecols=col, header=None, skiprows=row, nrows=1
@@ -320,7 +171,6 @@ def _read_scalar(filepath: str, sheet: str, col: str, row: int,
 
 
 def _read_thermal_capacities(filepath: str, data: dict) -> None:
-    """Populate *data* with all thermal technology capacity values."""
     def _cell(sheet: str, col: str, row: int) -> float:
         return _read_scalar(filepath, sheet, col, row)
 
@@ -353,7 +203,6 @@ def _read_thermal_capacities(filepath: str, data: dict) -> None:
 
 
 def _read_hydro_capacities(filepath: str, data: dict) -> None:
-    """Populate *data* with hydro technology capacity values."""
     def _cell(col: str, row: int, scale: float = 1.0) -> float:
         return _read_scalar(filepath, "Hydro", col, row) * scale
 
@@ -372,7 +221,6 @@ def _read_hydro_capacities(filepath: str, data: dict) -> None:
 
 def _read_res_capacities(filepath: str, data: dict, n_dsr: int = DSR_DEFAULT_COUNT,
                          climate_year: int | None = None) -> None:
-    """Populate *data* with RES and additional technology capacity values."""
     def _cell(sheet: str, col: str, row: int, scale: float = 1.0) -> float:
         return _read_scalar(filepath, sheet, col, row) * scale
 
@@ -396,7 +244,6 @@ def _read_res_capacities(filepath: str, data: dict, n_dsr: int = DSR_DEFAULT_COU
 
 
 def _read_storage_capacities(filepath: str, data: dict) -> None:
-    """Populate *data* with battery and electrolyser capacity values."""
     def _cell(sheet: str, col: str, row: int) -> float:
         return _read_scalar(filepath, sheet, col, row)
 
@@ -408,16 +255,9 @@ def _read_storage_capacities(filepath: str, data: dict) -> None:
 def _read_timeseries_capacities(filepath: str, data: dict, selected_hours: int,
                                 n_dsr: int = DSR_DEFAULT_COUNT,
                                 climate_year: int | None = None) -> None:
-    """Populate *data* with hourly time-series export / profile columns.
-
-    Reads all of a sheet's needed columns in a single call. Per-column reads on a
-    read-only workbook re-iterate the whole sheet each time (~1.7 s per column),
-    so batching a sheet's block of columns into one read is ~10x faster.
-    """
     _zeros = lambda: np.zeros((selected_hours, 1))
 
     def _block(sheet: str, first: str, last: str, row: int) -> pd.DataFrame:
-        # One read for the whole column range; empty frame on any failure.
         try:
             return pd.read_excel(
                 _excel(filepath), sheet_name=sheet, usecols=f"{first}:{last}",
@@ -438,16 +278,12 @@ def _read_timeseries_capacities(filepath: str, data: dict, selected_hours: int,
     def _assign(df: pd.DataFrame, i: int) -> np.ndarray:
         return df.iloc[:, i:i + 1].to_numpy() if i < df.shape[1] else _zeros()
 
-    # Other Non-RES: 27 type columns C..AC in one read.
     onr = _block("Other Non-RES", "C", _OTHER_NONRES_COLS[-1], 18)
     for _i in range(len(_OTHER_NONRES_COLS)):
         data[f"Other Non-RES{_i+1} (MW/h)"] = _assign(onr, _i)
 
     data["Exports_non_ENTSOe (MW/h)"] = -_one("Exchanges", "C", 28)
 
-    # DSR: read only this zone's actual width (avoids costly out-of-range reads);
-    # pad any remaining DSR{i} columns up to n_dsr with zeros. Columns whose
-    # climate-year range excludes *climate_year* are zeroed too.
     _w = _dsr_col_count(filepath)
     dsr = _block("DSR", "C", get_column_letter(2 + _w), 15) if _w > 0 else pd.DataFrame()
     dsr_mask = _dsr_climate_year_mask(filepath, _w, climate_year)
@@ -456,7 +292,6 @@ def _read_timeseries_capacities(filepath: str, data: dict, selected_hours: int,
             _assign(dsr, _i) if (_i >= len(dsr_mask) or dsr_mask[_i]) else _zeros()
         )
 
-    # Other RES: biomass/geothermal/marine/waste/unknown = columns E..I in one read.
     ores = _block("Other RES", "E", "I", 10)
     for _i, _nm in enumerate(("biomass", "geothermal", "marine", "waste", "unknown")):
         data[f"Other RES ({_nm}) (MW/h)"] = _assign(ores, _i)
@@ -468,31 +303,6 @@ def load_tech_characteristics(
     scenario: int,
     climate_year: int | None = None,
 ) -> pd.DataFrame:
-    """Load technology characteristic data (outage rates, ramp rates, etc.).
-
-    Reads per-unit characteristics for all thermal technologies, as well as
-    DSR, Battery, and Electrolyser units, from the PEMMDB workbooks.  CO2
-    factors and fuel prices are drawn from the common reference files.
-
-    Args:
-        node_df (pd.DataFrame): Nodes table (used for zone iteration).
-        selected_zones (list[str]): Zone codes to collect data for.
-        scenario (int): Scenario year.
-        climate_year (int | None): Climate year to extract. Only DSR type
-            columns whose "Climate year start"/"Climate year end" range
-            includes *climate_year* (inclusive) are included, others are
-            zeroed. When ``None``, no DSR column is excluded.
-
-    Returns:
-        pd.DataFrame: One row per zone with columns defined by
-            :data:`~collector.utils.config.TECH_CHAR_COLUMNS`.
-
-    Example:
-        >>> nodes = load_nodes()
-        >>> char_df = load_tech_characteristics(nodes, ["ES00"], 2030, 2009)
-        >>> "Ramp-Up Rate (MW/h)" in char_df.columns
-        True
-    """
     co2_col = get_co2_usecols(scenario)
     n_dsr = _dsr_count_for(selected_zones, scenario)
     tech_char_rows: list[dict] = []
@@ -515,7 +325,6 @@ def _read_single_zone_characteristics(
     filepath: str, co2_col: str, code: str, n_dsr: int = DSR_DEFAULT_COUNT,
     climate_year: int | None = None,
 ) -> dict:
-    """Read all technology characteristic fields for one zone."""
     def _arr(col: str, row: int, nrows: int = 52) -> np.ndarray:
         try:
             return pd.read_excel(
@@ -529,8 +338,6 @@ def _read_single_zone_characteristics(
         return _read_scalar(filepath_, sheet, col, row)
 
     def _reorder(arr: np.ndarray) -> np.ndarray:
-        # Only reorder a full 26-row thermal block; leave incomplete/malformed
-        # sheets (some countries' "Thermal" sheets are shorter) as-is.
         return arr[_THERMAL_SHEET_ROW_ORDER] if len(arr) == 26 else arr
 
     dc: dict = {"Code": code}
@@ -550,8 +357,6 @@ def _read_single_zone_characteristics(
     raw = _arr("AM", 11); dc["Fixed Generation Reduction (%)"]  = _reorder(raw[~np.isnan(raw.astype(float))])
     raw = _arr("AP", 11); dc["Maximum Number of Units in Maintenace"] = _reorder(raw[~np.isnan(raw.astype(float))])
 
-    # "CO2 emission factor" and "Common Data" already list ccgt_pre1/pre2 right
-    # after ccgt_old2, matching the canonical order, so no reorder is needed.
     co2_raw = pd.read_excel(
         _excel(FILEPATH_CO2_FACTORS), sheet_name="CO2 emission factor",
         usecols=co2_col, header=None, skiprows=4, nrows=26,
@@ -568,9 +373,6 @@ def _read_single_zone_characteristics(
     ).to_numpy()
     dc["Price (EUR/MWh)"] = price_raw
 
-    # Minimum up/down time and warm-start fuel consumption / fix cost. Same
-    # zone-independent reference table as Efficiency/Price above; used by
-    # core.py to derive Start-up Cost from each zone's commodity fuel price.
     minup_raw = pd.read_excel(
         _excel(FILEPATH_COMMON_DATA), sheet_name="Common Data", usecols="I",
         header=None, skiprows=14, nrows=26,
@@ -597,7 +399,6 @@ def _read_single_zone_characteristics(
     dc["Net maximum capacity - demand perspective (MW)"]     = zeros26.copy()
     dc["Number of Hours (h)"] = zeros26.copy()
 
-    # Other Non-RES1..27 (each successive column C..AC in the Other Non-RES sheet)
     for _col in _OTHER_NONRES_COLS:
         for key in ("Fixed Generation Reduction (%)", "Ramp-Up Rate (MW/h)", "Ramp-Down Rate (MW/h)"):
             dc[key] = np.append(dc[key], 0)
@@ -612,8 +413,6 @@ def _read_single_zone_characteristics(
                     "Start-up Fuel Consumption (GJ/MW)", "Start-up Fix Cost (EUR/MW)"):
             dc[key] = np.append(dc[key], 0)
 
-    # DSR1..n_dsr (each successive column in the DSR sheet); columns whose
-    # climate-year range excludes *climate_year* are excluded (zeroed).
     dsr_mask = _dsr_climate_year_mask(filepath, _dsr_col_count(filepath), climate_year)
     for _i, _col in enumerate(_dsr_cols(n_dsr)):
         _included = _i >= len(dsr_mask) or dsr_mask[_i]
@@ -668,23 +467,6 @@ def load_reserve_requirements(
     selected_zones: list[str],
     scenario: int,
 ) -> pd.DataFrame:
-    """Load FCR and FRR reserve requirement data from PEMMDB workbooks.
-
-    Args:
-        node_df (pd.DataFrame): Nodes table used for zone iteration.
-        selected_zones (list[str]): Zone codes to collect.
-        scenario (int): Scenario year.
-
-    Returns:
-        pd.DataFrame: One row per zone with columns defined by
-            :data:`~collector.utils.config.RESERVE_COLUMNS`.
-
-    Example:
-        >>> nodes = load_nodes()
-        >>> res_df = load_reserve_requirements(nodes, ["ES00"], 2030)
-        >>> "Total (FCR) (MW/h)" in res_df.columns
-        True
-    """
     rows: list[dict] = []
     for code in node_df["Code"]:
         if code not in selected_zones:
@@ -694,10 +476,6 @@ def load_reserve_requirements(
             def _cell(row: int) -> float:
                 return _read_scalar(filepath, "Reserves", "C", row)
 
-            # Reserves sheet orders each block Total -> Thermal -> Hydro:
-            #   FCR: Total=C10, Thermal=C11, Hydro=C12
-            #   FRR: Total=C16, Thermal=C17, Hydro=C18
-            # (_cell(n) reads C{n+1}).
             rows.append({
                 "Code":                  code,
                 "Total (FCR) (MW/h)":    _cell(9),
@@ -714,9 +492,7 @@ def load_reserve_requirements(
     return pd.DataFrame(rows, columns=RESERVE_COLUMNS)
 
 
-# ---------------------------------------------------------------------------
 # Cross-border exchange results loader
-# ---------------------------------------------------------------------------
 
 
 def load_crossborder_exchanges(
@@ -725,34 +501,6 @@ def load_crossborder_exchanges(
     filtered_edges_e_df: pd.DataFrame,
     selected_zones: list[str],
 ) -> pd.DataFrame:
-    """Load cross-border electricity exchange flows from the MM output file.
-
-    Reads the ``Crossborder exchanges`` worksheet via openpyxl (random-access)
-    for any exchange columns that involve a zone in *selected_zones* and a
-    neighbouring zone that appears in the filtered electricity edge table.
-    Flows *from* a selected zone are positive; flows *into* a selected zone
-    are negated.
-
-    Args:
-        scenario (int): Scenario year used to build the file path.
-        selected_hours (int): Number of hourly rows to read.
-        filtered_edges_e_df (pd.DataFrame): Electricity edge table already
-            filtered to the study perimeter; must contain ``Start_Node`` and
-            ``End_Node`` columns.
-        selected_zones (list[str]): Zone codes that define the study area.
-
-    Returns:
-        pd.DataFrame: Columns named ``Exports_<zone>_<neighbour> (MW/h)`` with
-            one row per hour. External source nodes (codes starting with "X",
-            e.g. XRU00, XSA00, XTN00, XMD00, XBACE — not in the edge table) are
-            summed into the zone's single ``Exports_<zone>_XX (MW/h)`` column.
-
-    Raises:
-        FileNotFoundError: When the MM output workbook is not found.
-
-    Example:
-        >>> df = load_crossborder_exchanges(2030, 8736, edges_df, ["ES00"])
-    """
     filepath = f"inputs/MMStandardOutputFile_NT{scenario}_Plexos_CY2009_2.5_v40.xlsx"
     unique_nodes = pd.unique(
         pd.concat([
@@ -775,12 +523,6 @@ def load_crossborder_exchanges(
         headers.append((col_idx, str(val).strip()))
         col_idx += 1
 
-    # (source col, output column name, direction). A normal neighbour present in
-    # the network edge table becomes "Exports_<zone>_<node>"; every external
-    # source node (codes starting with "X" — e.g. XRU00, XSA00, XTN00, XMD00,
-    # XBACE — not in the edge table) is summed into the zone's single
-    # "Exports_<zone>" column. Sign: "from" (zone is start) positive, "to" (zone
-    # is end) negated.
     specs: list[tuple[int, str, str]] = []
     for col, header in headers:
         for zone in selected_zones:
@@ -794,7 +536,7 @@ def load_crossborder_exchanges(
             else:
                 continue
             if str(node).startswith("X"):
-                name = f"Exports_{zone_str}_XX (MW/h)"        # aggregated external sources
+                name = f"Exports_{zone_str}_XX (MW/h)"
             elif node in unique_nodes_no_selected:
                 name = f"Exports_{zone_str}_{node} (MW/h)"
             else:
@@ -818,7 +560,7 @@ def load_crossborder_exchanges(
     for col, name, direction in specs:
         raw = col_data[col]
         values = raw if direction == "from" else [-v if v is not None else None for v in raw]
-        if name in export_df_dict:  # sum external sources aggregated on one zone
+        if name in export_df_dict:
             export_df_dict[name] = [(a or 0) + (b or 0) for a, b in zip(export_df_dict[name], values)]
         else:
             export_df_dict[name] = values
@@ -832,36 +574,6 @@ def load_crossborder_h2_exchanges(
     selected_zones: list[str],
     main_zone_map: dict[str, str],
 ) -> pd.DataFrame:
-    """Load cross-border hydrogen exchange flows from the MM output file.
-
-    Reads the ``Crossborder H2 exchanges`` worksheet, whose headers are
-    country-level H2 nodes (e.g. ``AT_H2->DE_H2``). For every flow between a
-    selected country and a non-selected neighbour, a column is produced named
-    ``H2Exports_<main zone>_<neighbour> (MW/h)``, where *<main zone>* is the
-    selected country's main H2 node (from *main_zone_map*, as used for H2
-    demand). A country neighbour appears as ``<CC>00``; all external source nodes
-    (``XDZ``, ``XMA``, ``XNO``, ``XUA``, ``XAmmonia`` …) are summed into the main
-    zone's single ``H2Exports_<main zone>_XX (MW/h)`` column, from which steam
-    methane reformer (SMR) production (``Hourly H2 Data`` sheet) is subtracted so
-    it counts as imported hydrogen. Sign follows the export
-    convention — a flow *from* the selected country is positive, a flow *into* it
-    is negated — mirroring :func:`load_crossborder_exchanges`. ``IB*``
-    interconnector hubs are resolved end to end (``A->IBIT->IT`` is treated as
-    ``A->IT``).
-
-    Args:
-        scenario (int): Scenario year used to build the file path.
-        selected_hours (int): Number of hourly rows to read.
-        selected_zones (list[str]): Zone codes that define the study area.
-        main_zone_map (dict[str, str]): Country prefix -> main H2 zone code.
-
-    Returns:
-        pd.DataFrame: One column per selected-country/neighbour H2 flow, one row
-            per hour. Empty if the worksheet is absent.
-
-    Raises:
-        FileNotFoundError: When the MM output workbook is not found.
-    """
     filepath = f"inputs/MMStandardOutputFile_NT{scenario}_Plexos_CY2009_2.5_v40.xlsx"
     selected_countries = {str(z)[:2] for z in selected_zones}
 
@@ -885,11 +597,6 @@ def load_crossborder_h2_exchanges(
         n = str(node).strip()
         return n[:-3] if n.endswith("_H2") else n
 
-    # Resolve IB* interconnector hubs (e.g. IBIT_H2, IBFI_H2), which pass H2
-    # between a source side (A->hub) and a sink side (hub->B). Each "A->hub"
-    # segment becomes a direct "A->B" edge carrying the A->hub value, for every
-    # sink B; the aggregate "hub->B" edges are dropped (the sources carry the
-    # flow). Example: AT_H2->IBIT_H2 plus IBIT_H2->IT_H2 -> AT_H2->IT_H2.
     def _is_hub(node: str) -> bool:
         return str(node).startswith("IB") and str(node).endswith("_H2")
 
@@ -901,26 +608,19 @@ def load_crossborder_h2_exchanges(
         if _is_hub(left) and not _is_hub(right):
             hub_sinks.setdefault(left, []).append(right)
 
-    edges: list[tuple[str, str, int]] = []  # (left node, right node, source col)
+    edges: list[tuple[str, str, int]] = []
     for col, header in headers:
         if "->" not in header:
             continue
         left, right = [p.strip() for p in header.split("->", 1)]
         if _is_hub(left):
-            continue  # aggregate hub->sink edge; dropped
+            continue
         if _is_hub(right):
             for sink in hub_sinks.get(right, []):
                 edges.append((left, sink, col))
         else:
             edges.append((left, right, col))
 
-    # (source col, output column name, direction). Sign follows the export
-    # convention: the selected zone as start node -> positive ("from"), as end
-    # node -> negated ("to"). Only flows to a non-selected neighbour are kept.
-    # Neighbour naming: a country node ("XX_H2") becomes "XX00" in
-    # "H2Exports_<main>_<CC>00"; every external source node (XDZ, XMA, XNO, XUA,
-    # XAmmonia — codes starting with "X") is collapsed onto the main zone's single
-    # "H2Exports_<main>" column, so all X.. flows sum (with the export sign).
     specs: list[tuple[int, str, str]] = []
     for left, right, col in edges:
         xc, yc = _cc(left), _cc(right)
@@ -932,7 +632,7 @@ def load_crossborder_h2_exchanges(
             continue
         main = main_zone_map.get(interested, f"{interested}00")
         if str(neigh_raw).startswith("X"):
-            name = f"H2Exports_{main}_XX (MW/h)"        # aggregated external sources
+            name = f"H2Exports_{main}_XX (MW/h)"
         elif str(neigh_raw).endswith("_H2"):
             name = f"H2Exports_{main}_{neigh_cc}00 (MW/h)"
         else:
@@ -950,10 +650,6 @@ def load_crossborder_h2_exchanges(
             )
         ]
 
-    # Steam methane reformer (SMR) production per country — treated as imported
-    # hydrogen and folded into the main zone's H2Exports_<main>_XX column. Sheet
-    # "Hourly H2 Data": row 11 category, row 12 country, row 13 sub-header, hourly
-    # data from row 14; each country block has one "Steam methane reformer" column.
     smr_by_main: dict[str, list] = {}
     if "Hourly H2 Data" in wb.sheetnames:
         sws = wb["Hourly H2 Data"]
@@ -983,14 +679,11 @@ def load_crossborder_h2_exchanges(
     for col, name, direction in specs:
         raw = col_data[col]
         values = raw if direction == "from" else [(-v if v is not None else None) for v in raw]
-        if name in out:  # sum flows mapping to the same column (X.. sources, hub sinks)
+        if name in out:
             out[name] = [(a or 0) + (b or 0) for a, b in zip(out[name], values)]
         else:
             out[name] = values
 
-    # Fold SMR in as imported hydrogen: subtract it from H2Exports_<main>_XX (a
-    # supply is a negative export). Create the column when the zone has SMR but no
-    # external X.. sources.
     for main, smr in smr_by_main.items():
         name = f"H2Exports_{main}_XX (MW/h)"
         if name in out:
@@ -1001,32 +694,19 @@ def load_crossborder_h2_exchanges(
     return pd.DataFrame(out)
 
 
-# ---------------------------------------------------------------------------
 # Data correction — use PLEXOS market-model results instead of input assumptions
-# ---------------------------------------------------------------------------
 
 
 def load_plexos_line_max_flows(
     scenario: int, selected_hours: int,
 ) -> tuple[dict[tuple[str, str], float], dict[frozenset, float]]:
-    """Peak |hourly flow| per line from the PLEXOS crossborder sheets.
-
-    Used by the "Data Correction" option to replace input line capacities with
-    the maximum flow the market model actually used (so flow <= capacity holds).
-
-    Returns:
-        tuple:
-          * electricity: ``{(start_node, end_node): max_abs_flow_MW}`` (zone codes)
-          * hydrogen:    ``{frozenset({countryA, countryB}): max_abs_flow_MW}``
-            with IB* interconnector hubs resolved end to end.
-    """
     filepath = f"inputs/MMStandardOutputFile_NT{scenario}_Plexos_CY2009_2.5_v40.xlsx"
     wb = openpyxl.load_workbook(filepath, data_only=True, read_only=True)
 
     def _header_max(sheet: str) -> dict[str, float]:
         ws = wb[sheet]
         rows = list(ws.iter_rows(values_only=True))
-        hdr = rows[10]                       # row 11 = headers
+        hdr = rows[10]
         res: dict[str, float] = {}
         for c in range(2, len(hdr)):
             h = hdr[c]
@@ -1079,22 +759,18 @@ def load_plexos_h2_demand_profiles(
     scenario: int,
     selected_hours: int,
 ) -> dict[str, list[dict]]:
-    """Hydrogen demand profiles taken from the PLEXOS ``Hourly H2 Data`` sheet
-    (``Demand [MWH2]`` per country) instead of the ENTSO-E ``NT_<year>.xlsx``
-    profiles. Same shape as :func:`load_hydrogen_demand_profiles`; each selected
-    zone carries its country's PLEXOS H2 demand (in MW)."""
     filepath = f"inputs/MMStandardOutputFile_NT{scenario}_Plexos_CY2009_2.5_v40.xlsx"
     wb = openpyxl.load_workbook(filepath, data_only=True, read_only=True)
     ws = wb["Hourly H2 Data"]
     rows = list(ws.iter_rows(values_only=True))
-    cat, ctry = rows[10], rows[11]           # row 11 category, row 12 country
+    cat, ctry = rows[10], rows[11]
     dem_col: dict[str, int] = {}
     for c in range(2, len(cat)):
         if cat[c] and str(cat[c]).startswith("Demand") and ctry[c]:
             cc = str(ctry[c])[:-3] if str(ctry[c]).endswith("_H2") else str(ctry[c])
             dem_col[cc] = c
     series: dict[str, np.ndarray] = {cc: np.zeros(selected_hours) for cc in dem_col}
-    for i, rw in enumerate(rows[13:13 + selected_hours]):   # data from row 14
+    for i, rw in enumerate(rows[13:13 + selected_hours]):
         for cc, c in dem_col.items():
             v = rw[c]
             if isinstance(v, (int, float)):
@@ -1116,36 +792,17 @@ def load_plexos_wind_offshore_cf(
     selected_hours: int,
     zones: list[str],
 ) -> dict[str, list[dict]]:
-    """Offshore wind hourly capacity factor derived from PLEXOS results.
-
-    Used by the "Data Correction" option to replace the PECD ``Wind_Offshore
-    Profile`` for zones (e.g. ``BEOF``) whose market-model dispatch is
-    preferred over the input profile: divides the PLEXOS ``Wind Offshore
-    [MW]`` generation by the zone's installed offshore wind capacity.
-
-    Args:
-        tech_cap_df (pd.DataFrame): Technology capacity table with ``Code``
-            and ``Wind (offshore) (MW)`` columns.
-        scenario (int): Scenario year.
-        selected_hours (int): Number of hourly values to read.
-        zones (list[str]): Zone codes to compute (e.g. ``["BEOF"]``).
-
-    Returns:
-        dict[str, list[dict]]: ``{"Wind_Offshore Profile": [...]}`` with one
-        entry per zone in *zones* found in the PLEXOS sheet. Zones with zero
-        or missing installed capacity get an all-zero profile.
-    """
     filepath = f"inputs/MMStandardOutputFile_NT{scenario}_Plexos_CY2009_2.5_v40.xlsx"
     wb = openpyxl.load_workbook(filepath, data_only=True, read_only=True)
     ws = wb["Hourly Market Data"]
     rows = list(ws.iter_rows(values_only=True))
-    cat, ctry = rows[10], rows[11]           # row 11 category, row 12 country
+    cat, ctry = rows[10], rows[11]
     gen_col: dict[str, int] = {}
     for c in range(2, len(cat)):
         if cat[c] and str(cat[c]).strip() == "Wind Offshore [MW]" and ctry[c] in zones:
             gen_col[str(ctry[c])] = c
     series: dict[str, np.ndarray] = {z: np.zeros(selected_hours) for z in gen_col}
-    for i, rw in enumerate(rows[13:13 + selected_hours]):   # data from row 14
+    for i, rw in enumerate(rows[13:13 + selected_hours]):
         for z, c in gen_col.items():
             v = rw[c]
             if isinstance(v, (int, float)):
@@ -1162,9 +819,7 @@ def load_plexos_wind_offshore_cf(
     return {"Wind_Offshore Profile": results}
 
 
-# ---------------------------------------------------------------------------
 # Demand profile loaders
-# ---------------------------------------------------------------------------
 
 
 def load_electricity_demand_profiles(
@@ -1174,26 +829,6 @@ def load_electricity_demand_profiles(
     climate_year: int,
     selected_hours: int,
 ) -> dict[str, list[dict]]:
-    """Load hourly electricity demand profiles from ENTSO-E NT workbooks.
-
-    Args:
-        node_df (pd.DataFrame): Nodes table for zone iteration.
-        selected_zones (list[str]): Zone codes to collect.
-        scenario (int): Scenario year.  2050 is not supported and raises
-            ``FileNotFoundError``.
-        climate_year (int): Climate year to extract (e.g. ``2009``).
-        selected_hours (int): Number of hourly values to read.
-
-    Returns:
-        dict[str, list[dict]]: Single-key dict
-            ``{"Electricity Demand Profile": [{"Code": ..., "Year": ..., "Data": np.ndarray}]}``.
-
-    Raises:
-        FileNotFoundError: When *scenario* is ``2050``.
-
-    Example:
-        >>> profiles = load_electricity_demand_profiles(nodes, ["ES00"], 2030, 2009, 8736)
-    """
     if scenario == 2050:
         raise FileNotFoundError("Electricity demand profiles are not available for scenario 2050")
 
@@ -1227,25 +862,6 @@ def load_hydrogen_demand_profiles(
     climate_year: int,
     selected_hours: int,
 ) -> dict[str, list[dict]]:
-    """Load hourly hydrogen demand profiles from ENTSO-E NT workbooks.
-
-    Args:
-        node_df (pd.DataFrame): Nodes table for zone iteration.
-        selected_zones (list[str]): Zone codes to collect.
-        scenario (int): Scenario year.  2050 is not supported.
-        climate_year (int): Climate year to extract.
-        selected_hours (int): Number of hourly values to read.
-
-    Returns:
-        dict[str, list[dict]]: Single-key dict
-            ``{"Hydrogen Demand Profile": [...]}``.
-
-    Raises:
-        FileNotFoundError: When *scenario* is ``2050``.
-
-    Example:
-        >>> profiles = load_hydrogen_demand_profiles(nodes, ["ES00"], 2030, 2009, 8736)
-    """
     if scenario == 2050:
         raise FileNotFoundError("Hydrogen demand profiles are not available for scenario 2050")
 
@@ -1256,10 +872,6 @@ def load_hydrogen_demand_profiles(
     sheet_year_row = 9
     results: list[dict] = []
 
-    # Hydrogen has one demand sheet per country, named by that country's single H2
-    # node — which may be any of the country's zone codes or "<CC>00" (e.g. LU00,
-    # DKE1, SE01, ITN1). For a zone, try every same-country zone code plus "<CC>00"
-    # and use the first candidate that is an actual sheet (one sheet per country).
     try:
         _h2_sheets = set(_excel(paths[scenario]).sheet_names)
     except Exception:
@@ -1294,7 +906,7 @@ def load_hydrogen_demand_profiles(
             sheet_year_row=sheet_year_row,
             profile_key="Hydrogen Demand Profile",
         )
-        entry["Code"] = code   # key by the electricity zone, not the H2 sheet name
+        entry["Code"] = code
         results.append(entry)
 
     return {"Hydrogen Demand Profile": results}
@@ -1306,23 +918,6 @@ def load_gas_demand_profiles(
     climate_year: int,
     selected_hours: int,
 ) -> dict[str, list[dict]]:
-    """Return zero-filled gas demand profile entries for each selected zone.
-
-    Gas hourly demand data is not yet available in the source dataset; zero
-    arrays are recorded as placeholders to keep the output schema consistent.
-
-    Args:
-        node_df (pd.DataFrame): Nodes table for zone iteration.
-        selected_zones (list[str]): Zone codes to include.
-        climate_year (int): Climate year label stored in each entry.
-        selected_hours (int): Length of the zero array.
-
-    Returns:
-        dict[str, list[dict]]: Single-key dict ``{"Gas Demand Profile": [...]}``.
-
-    Example:
-        >>> profiles = load_gas_demand_profiles(nodes, ["ES00"], 2009, 8736)
-    """
     results: list[dict] = []
     for code in node_df["Code"]:
         if code not in selected_zones:
@@ -1340,12 +935,6 @@ def _load_excel_demand_profile(
     sheet_year_row: int,
     profile_key: str,
 ) -> dict:
-    """Read one zone's demand profile from an Excel workbook.
-
-    Scans row *sheet_year_row* (0-indexed) for a column whose header equals
-    *climate_year*, then extracts *selected_hours* values starting from the
-    following row.
-    """
     try:
         df = pd.read_excel(filepath, sheet_name=code, header=0)
     except (ValueError, FileNotFoundError):
@@ -1377,17 +966,10 @@ def _load_excel_demand_profile(
     return {"Code": code, "Year": climate_year, "Data": arr}
 
 
-# ---------------------------------------------------------------------------
 # Generic PECD CSV profile loader
-# ---------------------------------------------------------------------------
 
 
 def _resolve_pecd_path(file_template: str, code: str) -> str | None:
-    """Resolve a PECD CSV path for *code*, tolerating an edition-label
-    mismatch (e.g. a file published as ``edition 2023.3`` while the rest of
-    the dataset uses ``edition 2023.2``). Falls back to a glob search over
-    the edition segment when the exact templated path doesn't exist.
-    """
     exact = file_template.format(code)
     if os.path.exists(exact):
         return exact
@@ -1406,34 +988,6 @@ def _load_pecd_csv_profiles(
     year_row_idx: int = 9,
     target_len: int | None = None,
 ) -> list[dict]:
-    """Load hourly generation profiles from PECD CSV files for all selected zones.
-
-    The PECD CSV files share a common layout: row *year_row_idx* (0-indexed)
-    is a header row containing numeric climate year values; data starts on the
-    following row.
-
-    Args:
-        node_df (pd.DataFrame): Nodes table for zone iteration.
-        selected_zones (list[str]): Zone codes to collect.
-        scenario (int): Scenario year used to resolve the file template.
-        climate_year (int): Climate year column to extract.
-        selected_hours (int): Number of hourly values to read (also used as
-            the fallback zero-array length).
-        profile_key (str): Key under which results are stored in the profile
-            dict (e.g. ``'Solar Profile'``).
-        year_row_idx (int): 0-indexed row number that contains climate year
-            headers. Defaults to ``9``.
-        target_len (int | None): Override the output array length; useful for
-            Solar Rooftop which is always 8760 h. Defaults to *selected_hours*.
-
-    Returns:
-        list[dict]: List of ``{"Code": ..., "Year": ..., "Data": np.ndarray}``
-            entries.
-
-    Raises:
-        KeyError: When *profile_key* is not in
-            :data:`~collector.utils.config.PECD_FILE_TEMPLATES`.
-    """
     if target_len is None:
         target_len = selected_hours
 
@@ -1476,30 +1030,13 @@ def _load_pecd_csv_profiles(
     return results
 
 
-# ---------------------------------------------------------------------------
 # Named PECD profile loaders (thin wrappers)
-# ---------------------------------------------------------------------------
 
 
 def load_csp_no_storage_profiles(
     node_df: pd.DataFrame, selected_zones: list[str],
     scenario: int, climate_year: int, selected_hours: int,
 ) -> dict[str, list[dict]]:
-    """Load hourly CSP (no storage) generation profiles.
-
-    Args:
-        node_df (pd.DataFrame): Nodes table.
-        selected_zones (list[str]): Zone codes.
-        scenario (int): Scenario year.
-        climate_year (int): Climate year.
-        selected_hours (int): Number of hourly values.
-
-    Returns:
-        dict[str, list[dict]]: ``{"CSP_noStorage Profile": [...]}``.
-
-    Example:
-        >>> p = load_csp_no_storage_profiles(nodes, ["ES00"], 2030, 2009, 8736)
-    """
     key = "CSP_noStorage Profile"
     return {key: _load_pecd_csv_profiles(node_df, selected_zones, scenario, climate_year, selected_hours, key)}
 
@@ -1508,21 +1045,6 @@ def load_csp_dispatch_profiles(
     node_df: pd.DataFrame, selected_zones: list[str],
     scenario: int, climate_year: int, selected_hours: int,
 ) -> dict[str, list[dict]]:
-    """Load hourly CSP (with storage – dispatch) generation profiles.
-
-    Args:
-        node_df (pd.DataFrame): Nodes table.
-        selected_zones (list[str]): Zone codes.
-        scenario (int): Scenario year.
-        climate_year (int): Climate year.
-        selected_hours (int): Number of hourly values.
-
-    Returns:
-        dict[str, list[dict]]: ``{"CSP_withStorage_D Profile": [...]}``.
-
-    Example:
-        >>> p = load_csp_dispatch_profiles(nodes, ["ES00"], 2030, 2009, 8736)
-    """
     key = "CSP_withStorage_D Profile"
     return {key: _load_pecd_csv_profiles(node_df, selected_zones, scenario, climate_year, selected_hours, key)}
 
@@ -1531,21 +1053,6 @@ def load_csp_predispatch_profiles(
     node_df: pd.DataFrame, selected_zones: list[str],
     scenario: int, climate_year: int, selected_hours: int,
 ) -> dict[str, list[dict]]:
-    """Load hourly CSP (with storage – pre-dispatch) generation profiles.
-
-    Args:
-        node_df (pd.DataFrame): Nodes table.
-        selected_zones (list[str]): Zone codes.
-        scenario (int): Scenario year.
-        climate_year (int): Climate year.
-        selected_hours (int): Number of hourly values.
-
-    Returns:
-        dict[str, list[dict]]: ``{"CSP_withStorage_PreD Profile": [...]}``.
-
-    Example:
-        >>> p = load_csp_predispatch_profiles(nodes, ["ES00"], 2030, 2009, 8736)
-    """
     key = "CSP_withStorage_PreD Profile"
     return {key: _load_pecd_csv_profiles(node_df, selected_zones, scenario, climate_year, selected_hours, key)}
 
@@ -1554,21 +1061,6 @@ def load_solar_profiles(
     node_df: pd.DataFrame, selected_zones: list[str],
     scenario: int, climate_year: int, selected_hours: int,
 ) -> dict[str, list[dict]]:
-    """Load hourly utility-scale solar PV capacity factor profiles.
-
-    Args:
-        node_df (pd.DataFrame): Nodes table.
-        selected_zones (list[str]): Zone codes.
-        scenario (int): Scenario year.
-        climate_year (int): Climate year.
-        selected_hours (int): Number of hourly values.
-
-    Returns:
-        dict[str, list[dict]]: ``{"Solar Profile": [...]}``.
-
-    Example:
-        >>> p = load_solar_profiles(nodes, ["ES00"], 2030, 2009, 8736)
-    """
     key = "Solar Profile"
     return {key: _load_pecd_csv_profiles(node_df, selected_zones, scenario, climate_year, selected_hours, key)}
 
@@ -1577,24 +1069,6 @@ def load_solar_rooftop_profiles(
     node_df: pd.DataFrame, selected_zones: list[str],
     scenario: int, climate_year: int, selected_hours: int,
 ) -> dict[str, list[dict]]:
-    """Load hourly rooftop solar PV capacity factor profiles.
-
-    Rooftop PV files always contain 8760 values; the array is padded or
-    truncated to that length rather than *selected_hours*.
-
-    Args:
-        node_df (pd.DataFrame): Nodes table.
-        selected_zones (list[str]): Zone codes.
-        scenario (int): Scenario year.
-        climate_year (int): Climate year.
-        selected_hours (int): Passed for API consistency (not used for length).
-
-    Returns:
-        dict[str, list[dict]]: ``{"Solar_Rooftop Profile": [...]}``.
-
-    Example:
-        >>> p = load_solar_rooftop_profiles(nodes, ["ES00"], 2030, 2009, 8736)
-    """
     key = "Solar_Rooftop Profile"
     return {key: _load_pecd_csv_profiles(
         node_df, selected_zones, scenario, climate_year, selected_hours, key,
@@ -1606,21 +1080,6 @@ def load_solar_utility_profiles(
     node_df: pd.DataFrame, selected_zones: list[str],
     scenario: int, climate_year: int, selected_hours: int,
 ) -> dict[str, list[dict]]:
-    """Load hourly utility-scale solar PV (utility sub-type) profiles.
-
-    Args:
-        node_df (pd.DataFrame): Nodes table.
-        selected_zones (list[str]): Zone codes.
-        scenario (int): Scenario year.
-        climate_year (int): Climate year.
-        selected_hours (int): Number of hourly values.
-
-    Returns:
-        dict[str, list[dict]]: ``{"Solar_Utility Profile": [...]}``.
-
-    Example:
-        >>> p = load_solar_utility_profiles(nodes, ["ES00"], 2030, 2009, 8736)
-    """
     key = "Solar_Utility Profile"
     return {key: _load_pecd_csv_profiles(node_df, selected_zones, scenario, climate_year, selected_hours, key)}
 
@@ -1629,21 +1088,6 @@ def load_wind_offshore_profiles(
     node_df: pd.DataFrame, selected_zones: list[str],
     scenario: int, climate_year: int, selected_hours: int,
 ) -> dict[str, list[dict]]:
-    """Load hourly offshore wind capacity factor profiles.
-
-    Args:
-        node_df (pd.DataFrame): Nodes table.
-        selected_zones (list[str]): Zone codes.
-        scenario (int): Scenario year.
-        climate_year (int): Climate year.
-        selected_hours (int): Number of hourly values.
-
-    Returns:
-        dict[str, list[dict]]: ``{"Wind_Offshore Profile": [...]}``.
-
-    Example:
-        >>> p = load_wind_offshore_profiles(nodes, ["ES00"], 2030, 2009, 8736)
-    """
     key = "Wind_Offshore Profile"
     return {key: _load_pecd_csv_profiles(node_df, selected_zones, scenario, climate_year, selected_hours, key)}
 
@@ -1652,28 +1096,11 @@ def load_wind_onshore_profiles(
     node_df: pd.DataFrame, selected_zones: list[str],
     scenario: int, climate_year: int, selected_hours: int,
 ) -> dict[str, list[dict]]:
-    """Load hourly onshore wind capacity factor profiles.
-
-    Args:
-        node_df (pd.DataFrame): Nodes table.
-        selected_zones (list[str]): Zone codes.
-        scenario (int): Scenario year.
-        climate_year (int): Climate year.
-        selected_hours (int): Number of hourly values.
-
-    Returns:
-        dict[str, list[dict]]: ``{"Wind_Onshore Profile": [...]}``.
-
-    Example:
-        >>> p = load_wind_onshore_profiles(nodes, ["ES00"], 2030, 2009, 8736)
-    """
     key = "Wind_Onshore Profile"
     return {key: _load_pecd_csv_profiles(node_df, selected_zones, scenario, climate_year, selected_hours, key)}
 
 
-# ---------------------------------------------------------------------------
 # Generic hydro inflow loader
-# ---------------------------------------------------------------------------
 
 
 def _load_hydro_inflow_profiles(
@@ -1684,26 +1111,6 @@ def _load_hydro_inflow_profiles(
     profile_key: str,
     scale_factor: float = HYDRO_SCALE_FACTOR,
 ) -> list[dict]:
-    """Load daily or weekly hydro inflow energy series from PEMMDB files.
-
-    Looks up the sheet name and expected series length from the config
-    constants :data:`~collector.utils.config.HYDRO_SHEET_NAMES` and
-    :data:`~collector.utils.config.HYDRO_TARGET_LENGTHS`.
-
-    Args:
-        node_df (pd.DataFrame): Nodes table for zone iteration.
-        selected_zones (list[str]): Zone codes to collect.
-        scenario (int): Scenario year.
-        climate_year (int): Climate year column to extract.
-        profile_key (str): Key identifying the hydro type (e.g.
-            ``'River Flow Energy'``).
-        scale_factor (float): Multiplier applied to raw values (converts
-            GWh → MWh by default). Defaults to ``1000.0``.
-
-    Returns:
-        list[dict]: List of ``{"Code": ..., "Year": ..., "Data": np.ndarray}``
-            entries.
-    """
     file_template = HYDRO_FILE_TEMPLATES[scenario]
     sheet_name = HYDRO_SHEET_NAMES[profile_key]
     target_len = HYDRO_TARGET_LENGTHS[profile_key]
@@ -1744,29 +1151,13 @@ def _load_hydro_inflow_profiles(
     return results
 
 
-# ---------------------------------------------------------------------------
 # Named hydro inflow loaders (thin wrappers)
-# ---------------------------------------------------------------------------
 
 
 def load_river_flow_profiles(
     node_df: pd.DataFrame, selected_zones: list[str],
     scenario: int, climate_year: int,
 ) -> dict[str, list[dict]]:
-    """Load daily run-of-river energy inflow profiles.
-
-    Args:
-        node_df (pd.DataFrame): Nodes table.
-        selected_zones (list[str]): Zone codes.
-        scenario (int): Scenario year.
-        climate_year (int): Climate year.
-
-    Returns:
-        dict[str, list[dict]]: ``{"River Flow Energy": [...]}``.
-
-    Example:
-        >>> p = load_river_flow_profiles(nodes, ["ES00"], 2030, 2009)
-    """
     key = "River Flow Energy"
     return {key: _load_hydro_inflow_profiles(node_df, selected_zones, scenario, climate_year, key)}
 
@@ -1775,20 +1166,6 @@ def load_pondage_flow_profiles(
     node_df: pd.DataFrame, selected_zones: list[str],
     scenario: int, climate_year: int,
 ) -> dict[str, list[dict]]:
-    """Load daily pondage hydro energy inflow profiles.
-
-    Args:
-        node_df (pd.DataFrame): Nodes table.
-        selected_zones (list[str]): Zone codes.
-        scenario (int): Scenario year.
-        climate_year (int): Climate year.
-
-    Returns:
-        dict[str, list[dict]]: ``{"Pondage Flow Energy": [...]}``.
-
-    Example:
-        >>> p = load_pondage_flow_profiles(nodes, ["ES00"], 2030, 2009)
-    """
     key = "Pondage Flow Energy"
     return {key: _load_hydro_inflow_profiles(node_df, selected_zones, scenario, climate_year, key)}
 
@@ -1797,20 +1174,6 @@ def load_reservoir_flow_profiles(
     node_df: pd.DataFrame, selected_zones: list[str],
     scenario: int, climate_year: int,
 ) -> dict[str, list[dict]]:
-    """Load weekly reservoir hydro energy inflow profiles.
-
-    Args:
-        node_df (pd.DataFrame): Nodes table.
-        selected_zones (list[str]): Zone codes.
-        scenario (int): Scenario year.
-        climate_year (int): Climate year.
-
-    Returns:
-        dict[str, list[dict]]: ``{"Reservoir Flow Energy": [...]}``.
-
-    Example:
-        >>> p = load_reservoir_flow_profiles(nodes, ["ES00"], 2030, 2009)
-    """
     key = "Reservoir Flow Energy"
     return {key: _load_hydro_inflow_profiles(node_df, selected_zones, scenario, climate_year, key)}
 
@@ -1819,20 +1182,6 @@ def load_open_ps_flow_profiles(
     node_df: pd.DataFrame, selected_zones: list[str],
     scenario: int, climate_year: int,
 ) -> dict[str, list[dict]]:
-    """Load weekly open-loop pump-storage energy inflow profiles.
-
-    Args:
-        node_df (pd.DataFrame): Nodes table.
-        selected_zones (list[str]): Zone codes.
-        scenario (int): Scenario year.
-        climate_year (int): Climate year.
-
-    Returns:
-        dict[str, list[dict]]: ``{"Open_PS Flow Energy": [...]}``.
-
-    Example:
-        >>> p = load_open_ps_flow_profiles(nodes, ["ES00"], 2030, 2009)
-    """
     key = "Open_PS Flow Energy"
     return {key: _load_hydro_inflow_profiles(node_df, selected_zones, scenario, climate_year, key)}
 
@@ -1841,27 +1190,11 @@ def load_closed_ps_flow_profiles(
     node_df: pd.DataFrame, selected_zones: list[str],
     scenario: int, climate_year: int,
 ) -> dict[str, list[dict]]:
-    """Load weekly closed-loop pump-storage energy inflow profiles.
-
-    Args:
-        node_df (pd.DataFrame): Nodes table.
-        selected_zones (list[str]): Zone codes.
-        scenario (int): Scenario year.
-        climate_year (int): Climate year.
-
-    Returns:
-        dict[str, list[dict]]: ``{"Closed_PS Flow Energy": [...]}``.
-
-    Example:
-        >>> p = load_closed_ps_flow_profiles(nodes, ["ES00"], 2030, 2009)
-    """
     key = "Closed_PS Flow Energy"
     return {key: _load_hydro_inflow_profiles(node_df, selected_zones, scenario, climate_year, key)}
 
 
-# ---------------------------------------------------------------------------
 # Convenience: load everything at once
-# ---------------------------------------------------------------------------
 
 
 def load_all_profiles(
@@ -1871,29 +1204,6 @@ def load_all_profiles(
     climate_year: int,
     selected_hours: int,
 ) -> dict[str, list[dict]]:
-    """Load all generation and demand profiles for the selected zones.
-
-    Calls every individual profile loader and merges their results into a
-    single dict keyed by profile type.  Missing files produce zero-filled
-    entries so downstream code always receives a complete dict.
-
-    Args:
-        node_df (pd.DataFrame): Nodes table.
-        selected_zones (list[str]): Zone codes to collect.
-        scenario (int): Scenario year.
-        climate_year (int): Climate year.
-        selected_hours (int): Number of hourly values per time series.
-
-    Returns:
-        dict[str, list[dict]]: Combined profiles dict with one key per profile
-            type and one list entry per zone.
-
-    Example:
-        >>> nodes = load_nodes()
-        >>> all_profiles = load_all_profiles(nodes, ["ES00"], 2030, 2009, 8736)
-        >>> list(all_profiles.keys())[:3]
-        ['Electricity Demand Profile', 'Hydrogen Demand Profile', 'Gas Demand Profile']
-    """
     combined: dict[str, list[dict]] = {}
     loaders = [
         lambda: load_electricity_demand_profiles(node_df, selected_zones, scenario, climate_year, selected_hours),
@@ -1927,23 +1237,6 @@ def load_commodity_prices(
     scenario_year: int,
     filepath: str = FILEPATH_COMMODITY_PRICES,
 ) -> dict[str, float]:
-    """Load TYNDP 2024 fuel commodity prices from the Matrix 2024 sheet.
-
-    Returns a dict of fuel-key → price in EUR/MWh (converted from EUR/GJ ×3.6).
-    Returns an empty dict if the file cannot be read.
-
-    Args:
-        scenario_year (int): Scenario year (2030, 2040, or 2050).
-        filepath (str): Path to the TYNDP commodity prices workbook.
-
-    Returns:
-        dict[str, float]: Fuel prices in EUR/MWh keyed by fuel name.
-
-    Example:
-        >>> prices = load_commodity_prices(2030)
-        >>> prices["Natural_Gas"]
-        22.64
-    """
     try:
         wb = openpyxl.load_workbook(filepath, read_only=True, data_only=True)
     except Exception as exc:
@@ -1961,7 +1254,7 @@ def load_commodity_prices(
                     year_col = j
                     break
             if year_col is None:
-                year_col = 3  # default to 2030 column
+                year_col = 3
         elif i >= 3 and year_col is not None:
             fuel = row[1]
             if fuel is None:
@@ -1993,7 +1286,6 @@ def load_commodity_prices(
         "Hydrogen":    _p("Hydrogen (blue )"),
         "Biomethane":  _p("Biomethane"),
         "Gas_blend_NT": _p("Gas (blend of biomethane, synthetic gas and NG) NT+"),
-        # CO2 price is quoted in EUR/ton (not EUR/GJ) → undo the ×3.6 conversion
         "CO2_price":   round(fuel_prices.get("CO2 price", 0.0) / 3.6, 4),
     }
 
@@ -2001,26 +1293,6 @@ def load_commodity_prices(
 def load_lignite_groups(
     filepath: str = FILEPATH_COMMODITY_PRICES,
 ) -> dict[str, str]:
-    """Parse Lignite country-to-group mapping from the Matrix 2024 sheet.
-
-    Reads the fuel name strings (e.g. "Lignite G2 (SK - DE - RS - PL - ME - UKNI - BA - IE)")
-    and extracts each country code from the parentheses.  Returns a dict mapping
-    country code → price key (e.g. ``{"DE": "Lignite_G2", "UKNI": "Lignite_G2", ...}``).
-
-    Using the Excel as the source means new groups or countries added to the
-    workbook are picked up automatically without any code change.
-
-    Args:
-        filepath (str): Path to the TYNDP commodity prices workbook.
-
-    Returns:
-        dict[str, str]: Country code → lignite price key.
-
-    Example:
-        >>> groups = load_lignite_groups()
-        >>> groups["UKNI"]
-        'Lignite_G2'
-    """
     try:
         wb = openpyxl.load_workbook(filepath, read_only=True, data_only=True)
     except Exception as exc:

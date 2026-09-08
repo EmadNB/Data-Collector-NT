@@ -91,8 +91,6 @@ Data Collector/
 │   ├── manage.py
 │   ├── selector/              # App: map UI, session state, /api/generate/
 │   └── siteproj/settings.py
-├── opentepes/                 # Notebook to solve the exported openTEPES case
-│   └── openTEPES.ipynb
 ├── run.bat                    # Windows launcher (starts server + opens browser)
 └── requirements.txt
 ```

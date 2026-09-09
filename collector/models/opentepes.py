@@ -1159,7 +1159,8 @@ def export_opentepes(
             if c.startswith("Other Non-RES") and _col_val(tech_cap_df, zone, c) != 0
         ]) == 1
         for cap_col, suffix, ot_tech, is_res, char_idx in tech_entries:
-            if (cap_col.startswith("DSR") or cap_col.startswith("Other Non-RES")) \
+            if (cap_col.startswith("DSR") or cap_col.startswith("Other Non-RES")
+                    or cap_col == "Electrolyser (MW)") \
                     and _col_val(tech_cap_df, zone, cap_col) == 0:
                 continue
 

@@ -694,7 +694,13 @@ def load_crossborder_h2_exchanges(
     return pd.DataFrame(out)
 
 
-# Data correction — use PLEXOS market-model results instead of input assumptions
+# PLEXOS market-model result overrides
+#
+# load_plexos_line_max_flows / load_plexos_h2_demand_profiles are optional
+# overrides used only when the "Data Correction" option is enabled.
+# load_plexos_wind_offshore_cf backs an always-on base-pipeline fix (PECD has
+# no offshore wind file at all for some zones, e.g. BEOF) and runs regardless
+# of that option.
 
 
 def load_plexos_line_max_flows(

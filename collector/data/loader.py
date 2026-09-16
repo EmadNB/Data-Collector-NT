@@ -651,6 +651,8 @@ def load_crossborder_h2_exchanges(
         ]
 
     smr_by_main: dict[str, list] = {}
+    discharge_by_main: dict[str, list] = {}
+    charge_by_main: dict[str, list] = {}
     if "Hourly H2 Data" in wb.sheetnames:
         sws = wb["Hourly H2 Data"]
         smr_data_start = 14
@@ -660,17 +662,26 @@ def load_crossborder_h2_exchanges(
             ctry = sws.cell(row=12, column=c).value
             if cat is None and ctry is None:
                 break
-            if cat and "Steam methane reformer" in str(cat) and ctry:
-                cc = str(ctry)[:-3] if str(ctry).endswith("_H2") else str(ctry)
-                if cc in selected_countries:
-                    main = main_zone_map.get(cc, f"{cc}00")
-                    smr_by_main[main] = [
-                        v[0] for v in sws.iter_rows(
-                            min_row=smr_data_start,
-                            max_row=smr_data_start + selected_hours - 1,
-                            min_col=c, max_col=c, values_only=True,
-                        )
-                    ]
+            if cat and ctry:
+                cat_s = str(cat)
+                target = None
+                if "Steam methane reformer" in cat_s:
+                    target = smr_by_main
+                elif "H2 storage discharge" in cat_s:
+                    target = discharge_by_main
+                elif "H2 storage charge" in cat_s:
+                    target = charge_by_main
+                if target is not None:
+                    cc = str(ctry)[:-3] if str(ctry).endswith("_H2") else str(ctry)
+                    if cc in selected_countries:
+                        main = main_zone_map.get(cc, f"{cc}00")
+                        target[main] = [
+                            v[0] for v in sws.iter_rows(
+                                min_row=smr_data_start,
+                                max_row=smr_data_start + selected_hours - 1,
+                                min_col=c, max_col=c, values_only=True,
+                            )
+                        ]
             c += 1
 
     wb.close()
@@ -684,12 +695,26 @@ def load_crossborder_h2_exchanges(
         else:
             out[name] = values
 
-    for main, smr in smr_by_main.items():
+    # Net credit at the "XX" (unmodeled/rest-of-world) bucket: SMR and storage
+    # discharge behave as extra supply (subtract from required import), while
+    # storage charge behaves as extra consumption (add to required import).
+    mains = set(smr_by_main) | set(discharge_by_main) | set(charge_by_main)
+    for main in mains:
+        smr = smr_by_main.get(main)
+        discharge = discharge_by_main.get(main)
+        charge = charge_by_main.get(main)
+        n = len(smr or discharge or charge or [])
+        credit = [
+            (charge[i] or 0 if charge else 0)
+            - (discharge[i] or 0 if discharge else 0)
+            - (smr[i] or 0 if smr else 0)
+            for i in range(n)
+        ]
         name = f"H2Exports_{main}_XX (MW/h)"
         if name in out:
-            out[name] = [(a or 0) - (s or 0) for a, s in zip(out[name], smr)]
+            out[name] = [(a or 0) + b for a, b in zip(out[name], credit)]
         else:
-            out[name] = [-(s or 0) for s in smr]
+            out[name] = credit
 
     return pd.DataFrame(out)
 

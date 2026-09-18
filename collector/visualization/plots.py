@@ -9,10 +9,9 @@ import pandas as pd
 import requests
 from bokeh.io import output_file, save as bokeh_save
 from bokeh.layouts import column as bokeh_column
-from bokeh.models import ColumnDataSource, HoverTool
+from bokeh.models import ColumnDataSource, HoverTool, Legend, LegendItem
 from bokeh.palettes import Category10, Category20
 from bokeh.plotting import figure
-from bokeh.transform import dodge
 from branca.element import MacroElement, Template
 
 from collector.utils.helpers import build_zone_display_map, expand_profile_to_hourly
@@ -32,115 +31,114 @@ def _apply_font(p, font_factor: float = 1.0) -> None:
     p.yaxis.axis_label_text_font_size = f"{font_factor * 11}pt"
     p.xaxis.major_label_text_font_size = f"{font_factor * 10}pt"
     p.yaxis.major_label_text_font_size = f"{font_factor * 10}pt"
-    p.legend.label_text_font_size  = f"{font_factor * 10}pt"
-
-
-def _bar_offsets(n: int, total_width: float = 0.85) -> tuple[float, list[float]]:
-    bar_w = max(0.05, total_width / max(1, n))
-    if n == 1:
-        return bar_w, [0.0]
-    offsets = list(np.linspace(-total_width / 2 + bar_w / 2,
-                                total_width / 2 - bar_w / 2, n))
-    return bar_w, offsets
+    if p.legend:
+        p.legend.label_text_font_size = f"{font_factor * 10}pt"
 
 
 # Capacity bar charts
 
 
-def plot_capacity_by_technology(
-    tech_cap_df: pd.DataFrame,
+def _zone_titles(
     selected_zones: list[str],
     zone_to_display: dict[str, str],
+) -> dict[str, str]:
+    """Zone's display label with the zone code always appended in parentheses."""
+    def _label(z: str) -> str:
+        text = zone_to_display.get(z, z)
+        suffix = f" ({z})"
+        return text[: -len(suffix)] if text.endswith(suffix) else text
+
+    return {z: f"{_label(z)} ({z})" for z in selected_zones}
+
+
+def _capacity_by_zone_chart(
+    techs: list[str],
+    dfz: pd.DataFrame,
+    selected_zones: list[str],
+    zone_to_display: dict[str, str],
+    y_axis_label: str,
     output_path: str,
+    legend_ncols: int = 8,
 ) -> None:
-    exclude = [c for c in tech_cap_df.columns if c.endswith("(MWh)") or c.endswith("(MW/h)")]
-    techs = [c for c in tech_cap_df.columns if c != "Code" and c not in exclude]
-    dfz = tech_cap_df[tech_cap_df["Code"].isin(selected_zones)].copy()
-    for c in techs:
-        dfz[c] = pd.to_numeric(dfz[c], errors="coerce").fillna(0.0)
+    """One sub-plot per zone, stacked vertically. Bars sit side by side within a
+    sub-plot, colored consistently by technology across every sub-plot so colors
+    stay comparable across countries. A technology is dropped everywhere only if
+    it is zero in all selected zones. One shared, clickable legend sits above the
+    first sub-plot and toggles that technology's bars across every sub-plot at
+    once (click_policy="hide")."""
+    titles = _zone_titles(selected_zones, zone_to_display)
 
-    n = len(selected_zones)
-    bar_w, offsets = _bar_offsets(n)
-    colors = _zone_palette(n)
-
-    source_dict: dict = {"tech": techs}
+    values_by_zone: dict[str, dict[str, float]] = {}
     for z in selected_zones:
         row = dfz[dfz["Code"] == z]
-        source_dict[z] = [float(row.iloc[0][t]) if not row.empty else 0.0 for t in techs]
-    source = ColumnDataSource(source_dict)
+        values_by_zone[z] = {
+            t: (float(row.iloc[0][t]) if not row.empty and t in row.columns else 0.0)
+            for t in techs
+        }
 
-    p = figure(
-        x_range=techs,
-        title="Installed Capacities by Technology",
-        x_axis_label="Technology",
-        y_axis_label="Capacity (MW)",
-        width=1300, height=500,
-        tools="pan,wheel_zoom,box_zoom,reset,save",
-    )
-    for i, z in enumerate(selected_zones):
-        r = p.vbar(
-            x=dodge("tech", float(offsets[i]), range=p.x_range),
-            top=z, width=bar_w, source=source,
-            color=colors[i], legend_label=zone_to_display.get(z, z), alpha=0.7,
-        )
-        p.add_tools(HoverTool(renderers=[r], tooltips=[
-            ("Zone", zone_to_display.get(z, z)),
-            ("Technology", "@tech"),
-            ("Capacity", f"@{z}{{0,0.00}}"),
-        ]))
-    p.xaxis.major_label_orientation = 1.5708
-    _apply_font(p)
-    output_file(output_path)
-    bokeh_save(p)
-
-
-def plot_storage_capacity_by_technology(
-    tech_cap_df: pd.DataFrame,
-    selected_zones: list[str],
-    zone_to_display: dict[str, str],
-    output_path: str,
-) -> None:
-    ex_techs = [c for c in tech_cap_df.columns if c.endswith("(MWh)")]
-    if not ex_techs:
+    used_techs = [t for t in techs if any(values_by_zone[z][t] > 0 for z in selected_zones)]
+    if not used_techs:
         return
+    tech_colors = dict(zip(used_techs, _zone_palette(len(used_techs))))
+    tech_renderers: dict[str, list] = {t: [] for t in used_techs}
 
-    dfz = tech_cap_df[tech_cap_df["Code"].isin(selected_zones)].copy()
-    for c in ex_techs:
-        dfz[c] = pd.to_numeric(dfz[c], errors="coerce").fillna(0.0)
-
-    n = len(selected_zones)
-    bar_w, offsets = _bar_offsets(n)
-    colors = _zone_palette(n)
-
-    source_dict: dict = {"tech": ex_techs}
+    rows = []
     for z in selected_zones:
-        row = dfz[dfz["Code"] == z]
-        source_dict[z] = [float(row.iloc[0][t]) if not row.empty else 0.0 for t in ex_techs]
-    source = ColumnDataSource(source_dict)
-
-    p = figure(
-        x_range=ex_techs,
-        title="Storage Capacities by Technology",
-        x_axis_label="Technology (MWh)",
-        y_axis_label="Capacity (MWh)",
-        width=1300, height=500,
-        tools="pan,wheel_zoom,box_zoom,reset,save",
-    )
-    for i, z in enumerate(selected_zones):
-        r = p.vbar(
-            x=dodge("tech", float(offsets[i]), range=p.x_range),
-            top=z, width=bar_w, source=source,
-            color=colors[i], legend_label=zone_to_display.get(z, z), alpha=0.7,
+        values = values_by_zone[z]
+        p = figure(
+            x_range=used_techs,
+            title=titles[z],
+            y_axis_label=y_axis_label,
+            width=1300, height=300,
+            tools="pan,wheel_zoom,box_zoom,reset,save",
         )
-        p.add_tools(HoverTool(renderers=[r], tooltips=[
-            ("Zone", zone_to_display.get(z, z)),
+        subplot_renderers = []
+        for t in used_techs:
+            source = ColumnDataSource({"tech": [t], "value": [values[t]]})
+            r = p.vbar(
+                x="tech", top="value", width=0.7, source=source,
+                color=tech_colors[t], alpha=0.9,
+            )
+            tech_renderers[t].append(r)
+            subplot_renderers.append(r)
+        p.add_tools(HoverTool(renderers=subplot_renderers, tooltips=[
+            ("Zone", titles[z]),
             ("Technology", "@tech"),
-            ("Capacity", f"@{z}{{0,0.00}}"),
+            ("Capacity", "@value{0,0.00}"),
         ]))
-    p.xaxis.major_label_orientation = 1.5708
-    _apply_font(p)
-    output_file(output_path)
-    bokeh_save(p)
+        p.xaxis.visible = False
+        _apply_font(p, font_factor=0.85)
+        rows.append(p)
+
+    ncols = min(legend_ncols, len(used_techs))
+    nrows = -(-len(used_techs) // ncols)  # ceil division
+    legend_holder = figure(
+        width=1300, height=40 + nrows * 30,
+        toolbar_location=None, outline_line_color=None,
+    )
+    legend_holder.axis.visible = False
+    legend_holder.grid.visible = False
+
+    # A same-figure swatch renderer per technology: Bokeh resolves a legend
+    # item's swatch color from its *first* renderer, and that only renders
+    # reliably when the renderer belongs to the legend's own figure. The real
+    # cross-subplot renderers are still included so click_policy="hide" keeps
+    # toggling that technology's bars everywhere.
+    legend_items = []
+    for t in used_techs:
+        swatch = legend_holder.scatter(x=[0], y=[0], marker="square", size=0, color=tech_colors[t])
+        legend_items.append(LegendItem(label=t, renderers=[swatch, *tech_renderers[t]]))
+
+    legend = Legend(
+        items=legend_items,
+        click_policy="hide", orientation="horizontal", location="center",
+        label_text_font_size="8.5pt", ncols=ncols,
+    )
+    legend_holder.add_layout(legend, "center")
+    rows.insert(0, legend_holder)
+
+    output_file(output_path, title="Data-Collector-NT")
+    bokeh_save(bokeh_column(*rows, sizing_mode="stretch_width"))
 
 
 def plot_capacity_by_zone(
@@ -154,49 +152,7 @@ def plot_capacity_by_zone(
     dfz = tech_cap_df[tech_cap_df["Code"].isin(selected_zones)].copy()
     for c in techs:
         dfz[c] = pd.to_numeric(dfz[c], errors="coerce").fillna(0.0)
-
-    zone_labels = [zone_to_display.get(z, z) for z in selected_zones]
-    m = len(techs)
-    bar_w, offsets = _bar_offsets(m)
-    colors = _zone_palette(m)
-
-    tech_to_values: dict = {}
-    for tech in techs:
-        vals = []
-        for z in selected_zones:
-            row = dfz[dfz["Code"] == z]
-            vals.append(float(row.iloc[0][tech]) if not row.empty else 0.0)
-        tech_to_values[tech] = vals
-    source = ColumnDataSource({"zone": zone_labels, **tech_to_values})
-
-    p = figure(
-        x_range=zone_labels,
-        title="Installed Capacities by Zone",
-        x_axis_label="Zone",
-        y_axis_label="Capacity (MW)",
-        width=1300, height=500,
-        tools="pan,wheel_zoom,box_zoom,reset,save",
-    )
-    for i, tech in enumerate(techs):
-        r = p.vbar(
-            x=dodge("zone", float(offsets[i]), range=p.x_range),
-            top=tech, width=bar_w, source=source,
-            color=colors[i], legend_label=tech, alpha=0.9,
-        )
-        p.add_tools(HoverTool(renderers=[r], tooltips=[
-            ("Zone", "@zone"),
-            ("Technology", tech),
-            ("Capacity", f"@{{{tech}}}{{0,0.00}}"),
-        ]))
-    p.xaxis.major_label_orientation = 0
-    p.legend.location = "top_right"
-    p.legend.click_policy = "hide"
-    p.legend.orientation = "vertical"
-    p.legend.title = "Technologies"
-    p.legend.ncols = 3
-    _apply_font(p)
-    output_file(output_path)
-    bokeh_save(p)
+    _capacity_by_zone_chart(techs, dfz, selected_zones, zone_to_display, "Capacity (MW)", output_path, legend_ncols=5)
 
 
 def plot_storage_capacity_by_zone(
@@ -208,51 +164,10 @@ def plot_storage_capacity_by_zone(
     ex_techs = [c for c in tech_cap_df.columns if c.endswith("(MWh)")]
     if not ex_techs:
         return
-
     dfz = tech_cap_df[tech_cap_df["Code"].isin(selected_zones)].copy()
     for c in ex_techs:
         dfz[c] = pd.to_numeric(dfz[c], errors="coerce").fillna(0.0)
-
-    zone_labels = [zone_to_display.get(z, z) for z in selected_zones]
-    m = len(ex_techs)
-    bar_w, offsets = _bar_offsets(m)
-    colors = _zone_palette(m)
-
-    tech_to_values: dict = {}
-    for tech in ex_techs:
-        vals = []
-        for z in selected_zones:
-            row = dfz[dfz["Code"] == z]
-            vals.append(float(row.iloc[0][tech]) if not row.empty and tech in row.columns else 0.0)
-        tech_to_values[tech] = vals
-    source = ColumnDataSource({"zone": zone_labels, **tech_to_values})
-
-    p = figure(
-        x_range=zone_labels,
-        title="Storage Capacities by Zone",
-        x_axis_label="Zone",
-        y_axis_label="Capacity (MWh)",
-        width=1300, height=500,
-        tools="pan,wheel_zoom,box_zoom,reset,save",
-    )
-    for i, tech in enumerate(ex_techs):
-        r = p.vbar(
-            x=dodge("zone", float(offsets[i]), range=p.x_range),
-            top=tech, width=bar_w, source=source,
-            color=colors[i], legend_label=tech, alpha=0.9,
-        )
-        p.add_tools(HoverTool(renderers=[r], tooltips=[
-            ("Zone", "@zone"),
-            ("Technology", tech),
-            ("Capacity", f"@{{{tech}}}{{0,0.00}}"),
-        ]))
-    p.xaxis.major_label_orientation = 0
-    p.legend.location = "top_right"
-    p.legend.click_policy = "hide"
-    p.legend.ncols = 1
-    _apply_font(p)
-    output_file(output_path)
-    bokeh_save(p)
+    _capacity_by_zone_chart(ex_techs, dfz, selected_zones, zone_to_display, "Capacity (MWh)", output_path)
 
 
 # Profile time-series plots
@@ -308,7 +223,7 @@ def plot_profiles(
             plots.append(p)
 
         html_path = os.path.join(output_dir, f"{profile_type}.html")
-        output_file(html_path)
+        output_file(html_path, title="Data-Collector-NT")
         if plots:
             bokeh_save(plots)
         else:

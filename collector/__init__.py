@@ -40,13 +40,11 @@ from collector.processing.transforms import (
 # Visualisation
 from collector.visualization.plots import (
     plot_availability_report,
-    plot_capacity_by_technology,
     plot_capacity_by_zone,
     plot_electricity_network_map,
     plot_gas_network_map,
     plot_hydrogen_network_map,
     plot_profiles,
-    plot_storage_capacity_by_technology,
     plot_storage_capacity_by_zone,
 )
 
@@ -100,8 +98,6 @@ __all__ = [
     "build_storage_data",
     "build_terminal_data",
     "normalise_profiles_to_hourly",
-    "plot_capacity_by_technology",
-    "plot_storage_capacity_by_technology",
     "plot_capacity_by_zone",
     "plot_storage_capacity_by_zone",
     "plot_profiles",

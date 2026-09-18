@@ -49,13 +49,11 @@ from collector.utils.helpers import (
 )
 from collector.visualization.plots import (
     plot_availability_report,
-    plot_capacity_by_technology,
     plot_capacity_by_zone,
     plot_electricity_network_map,
     plot_gas_network_map,
     plot_hydrogen_network_map,
     plot_profiles,
-    plot_storage_capacity_by_technology,
     plot_storage_capacity_by_zone,
 )
 
@@ -222,21 +220,13 @@ def _pipeline(
     if generate_html:
         print("\n=== Plotting capacity charts ===")
         zone_to_display = build_zone_display_map(node_df, zones)
-        plot_capacity_by_technology(
-            tech_cap_df, zones, zone_to_display,
-            os.path.join(html_dir, "Technology Capacities (ver.1).html"),
-        )
-        plot_storage_capacity_by_technology(
-            tech_cap_df, zones, zone_to_display,
-            os.path.join(html_dir, "Storage Capacities (ver.1).html"),
-        )
         plot_capacity_by_zone(
             tech_cap_df, zones, zone_to_display,
-            os.path.join(html_dir, "Technology Capacities (ver.2).html"),
+            os.path.join(html_dir, "Technology Capacities.html"),
         )
         plot_storage_capacity_by_zone(
             tech_cap_df, zones, zone_to_display,
-            os.path.join(html_dir, "Storage Capacities (ver.2).html"),
+            os.path.join(html_dir, "Storage Capacities.html"),
         )
 
         # Step 8: profile visualisations

@@ -721,67 +721,10 @@ def load_crossborder_h2_exchanges(
 
 # PLEXOS market-model result overrides
 #
-# load_plexos_line_max_flows / load_plexos_h2_demand_profiles are optional
-# overrides used only when the "Data Correction" option is enabled.
-# load_plexos_wind_offshore_cf backs an always-on base-pipeline fix (PECD has
-# no offshore wind file at all for some zones, e.g. BEOF) and runs regardless
-# of that option.
-
-
-def load_plexos_line_max_flows(
-    scenario: int, selected_hours: int,
-) -> tuple[dict[tuple[str, str], float], dict[frozenset, float]]:
-    filepath = f"inputs/MMStandardOutputFile_NT{scenario}_Plexos_CY2009_2.5_v40.xlsx"
-    wb = openpyxl.load_workbook(filepath, data_only=True, read_only=True)
-
-    def _header_max(sheet: str) -> dict[str, float]:
-        ws = wb[sheet]
-        rows = list(ws.iter_rows(values_only=True))
-        hdr = rows[10]
-        res: dict[str, float] = {}
-        for c in range(2, len(hdr)):
-            h = hdr[c]
-            if not h or "->" not in str(h):
-                continue
-            mx = 0.0
-            for rw in rows[11:11 + selected_hours]:
-                v = rw[c]
-                if isinstance(v, (int, float)):
-                    a = abs(v)
-                    if a > mx:
-                        mx = a
-            res[str(h).strip()] = mx
-        return res
-
-    elec_h = _header_max("Crossborder exchanges")
-    h2_h = _header_max("Crossborder H2 exchanges")
-    wb.close()
-
-    elec: dict[tuple[str, str], float] = {}
-    for k, v in elec_h.items():
-        a, b = [p.strip() for p in k.split("->", 1)]
-        elec[(a, b)] = v
-
-    def _cc(n: str) -> str:
-        return n[:-3] if n.endswith("_H2") else n
-
-    hub_sinks: dict[str, list[str]] = {}
-    for k in h2_h:
-        l, r = [p.strip() for p in k.split("->", 1)]
-        if l.startswith("IB") and l.endswith("_H2") and not (r.startswith("IB") and r.endswith("_H2")):
-            hub_sinks.setdefault(l, []).append(r)
-
-    h2: dict[frozenset, float] = {}
-    for k, v in h2_h.items():
-        l, r = [p.strip() for p in k.split("->", 1)]
-        if l.startswith("IB") and l.endswith("_H2"):
-            continue
-        dests = hub_sinks.get(r, [r]) if (r.startswith("IB") and r.endswith("_H2")) else [r]
-        for d in dests:
-            key = frozenset({_cc(l), _cc(d)})
-            if len(key) == 2:
-                h2[key] = max(h2.get(key, 0.0), v)
-    return elec, h2
+# load_plexos_h2_demand_profiles is an optional override used only when the
+# "Data Correction" option is enabled. load_plexos_wind_offshore_cf backs an
+# always-on base-pipeline fix (PECD has no offshore wind file at all for some
+# zones, e.g. BEOF) and runs regardless of that option.
 
 
 def load_plexos_h2_demand_profiles(

@@ -16,7 +16,6 @@ from collector.data.loader import (
     load_network_terminals,
     load_nodes,
     load_plexos_h2_demand_profiles,
-    load_plexos_line_max_flows,
     load_plexos_wind_offshore_cf,
     load_reserve_requirements,
     load_tech_capacities,
@@ -25,7 +24,6 @@ from collector.data.loader import (
 from collector.models.core import export_all_zones
 from collector.models.opentepes import export_opentepes, h2_main_zones
 from collector.processing.transforms import (
-    apply_plexos_line_capacities,
     build_network_data,
     build_storage_data,
     build_terminal_data,
@@ -163,14 +161,6 @@ def _pipeline(
     )
     storage_df  = build_storage_data(storages_g, storages_h, zones, gas_storage, hydrogen_storage)
     terminal_df = build_terminal_data(terminals_g, terminals_h, zones, gas_terminal, hydrogen_terminal)
-
-    if data_correction:
-        print("\n=== Data correction: overriding line capacities from PLEXOS flows ===")
-        try:
-            elec_max, h2_max = load_plexos_line_max_flows(scenario, hours)
-            network_df = apply_plexos_line_capacities(network_df, elec_max, h2_max)
-        except FileNotFoundError as exc:
-            print(f"Warning: PLEXOS result file not found, skipping capacity correction – {exc}")
 
     # Step 5: cross-border exchanges
     print("\n=== Loading cross-border exchanges ===")

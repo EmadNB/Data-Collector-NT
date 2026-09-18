@@ -3,7 +3,7 @@
 VALID_SCENARIOS = [2030, 2040, 2050]
 
 GAS_PIPE_OPTIONS = ["Existing", "Low", "Advanced", "High"]
-HYDROGEN_PIPE_OPTIONS = ["PCI/PMI", "Advanced", "Less-Advanced"]
+HYDROGEN_PIPE_OPTIONS = ["PCI/PMI", "Advanced", "Less-Advanced", "ENTSO-E"]
 GAS_STORAGE_OPTIONS = ["Low", "Advanced", "High"]
 HYDROGEN_STORAGE_OPTIONS = ["PCI/PMI", "Advanced", "Less-Advanced"]
 GAS_TERMINAL_OPTIONS = ["Low", "Advanced", "High"]

@@ -126,7 +126,7 @@ def filter_hydrogen_edges(
     hydrogen_pipe: str,
 ) -> pd.DataFrame:
     validate_option(hydrogen_pipe, HYDROGEN_PIPE_OPTIONS, "hydrogen_pipe")
-    col_map = {"PCI/PMI": (3, 4), "Advanced": (5, 6), "Less-Advanced": (7, 8)}
+    col_map = {"PCI/PMI": (3, 4), "Advanced": (5, 6), "Less-Advanced": (7, 8), "ENTSO-E": (9, 10)}
     from_col, to_col = col_map[hydrogen_pipe]
 
     sel = [str(z) for z in selected_zones]
@@ -287,36 +287,6 @@ def build_storage_data(
             storages_h_df, selected_zones, hydrogen_storage
         ).to_numpy(),
     }
-
-
-def apply_plexos_line_capacities(
-    network_df: dict[str, np.ndarray],
-    elec_max: dict[tuple[str, str], float],
-    h2_max: dict[frozenset, float],
-) -> dict[str, np.ndarray]:
-    e = network_df.get("Line Capacity (Electricity)")
-    if e is not None and len(e):
-        e = np.array(e, dtype=object)
-        for row in e:
-            a, b = str(row[0]), str(row[1])
-            mf = elec_max.get((a, b))
-            if mf is None:
-                mf = elec_max.get((b, a))
-            if mf is not None:
-                row[2] = mf
-                row[3] = mf
-        network_df["Line Capacity (Electricity)"] = e
-
-    h = network_df.get("Line Capacity (Hydrogen)")
-    if h is not None and len(h):
-        h = np.array(h, dtype=object)
-        for row in h:
-            mf = h2_max.get(frozenset({str(row[0])[:2], str(row[1])[:2]}))
-            if mf is not None:
-                row[2] = mf
-                row[3] = mf
-        network_df["Line Capacity (Hydrogen)"] = h
-    return network_df
 
 
 def build_terminal_data(

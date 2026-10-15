@@ -340,6 +340,16 @@ def _read_single_zone_characteristics(
     def _reorder(arr: np.ndarray) -> np.ndarray:
         return arr[_THERMAL_SHEET_ROW_ORDER] if len(arr) == 26 else arr
 
+    def _ramp_fleet_mw_per_h(raw: np.ndarray, units: np.ndarray) -> np.ndarray:
+        # PEMMDB labels the Thermal ramp columns "MW/h", but the values are MW/min
+        # per unit; scale to the whole fleet in MW/h. Multiply row-by-row before
+        # dropping blanks — some zones have units but no ramp in a row.
+        raw = raw.astype(float)
+        mask = ~np.isnan(raw)
+        if units.shape == raw.shape:
+            raw = raw * np.nan_to_num(units.astype(float)) * 60.0
+        return raw[mask]
+
     dc: dict = {"Code": code}
 
     raw = _arr("D", 11); dc["Number of Units"]                  = _reorder(raw[~np.isnan(raw.astype(float))])
@@ -352,8 +362,9 @@ def _read_single_zone_characteristics(
     raw = _arr("AH", 11); dc["Annual Forced Outage (Days)"]     = _reorder(raw[~np.isnan(raw.astype(float))])
     raw = _arr("AI", 11); dc["Annual Forced Outage in Winter (%)"] = _reorder(raw[~np.isnan(raw.astype(float))])
     raw = _arr("AJ", 11); dc["Minimum Stable Power (%)"]        = _reorder(raw[~np.isnan(raw.astype(float))])
-    raw = _arr("AK", 11); dc["Ramp-Up Rate (MW/h)"]             = _reorder(raw[~np.isnan(raw.astype(float))])
-    raw = _arr("AL", 11); dc["Ramp-Down Rate (MW/h)"]           = _reorder(raw[~np.isnan(raw.astype(float))])
+    units_raw = _arr("D", 11)
+    raw = _arr("AK", 11); dc["Ramp-Up Rate (MW/h)"]             = _reorder(_ramp_fleet_mw_per_h(raw, units_raw))
+    raw = _arr("AL", 11); dc["Ramp-Down Rate (MW/h)"]           = _reorder(_ramp_fleet_mw_per_h(raw, units_raw))
     raw = _arr("AM", 11); dc["Fixed Generation Reduction (%)"]  = _reorder(raw[~np.isnan(raw.astype(float))])
     raw = _arr("AP", 11); dc["Maximum Number of Units in Maintenace"] = _reorder(raw[~np.isnan(raw.astype(float))])
 

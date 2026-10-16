@@ -341,9 +341,7 @@ def _read_single_zone_characteristics(
         return arr[_THERMAL_SHEET_ROW_ORDER] if len(arr) == 26 else arr
 
     def _ramp_fleet_mw_per_h(raw: np.ndarray, units: np.ndarray) -> np.ndarray:
-        # PEMMDB labels the Thermal ramp columns "MW/h", but the values are MW/min
-        # per unit; scale to the whole fleet in MW/h. Multiply row-by-row before
-        # dropping blanks — some zones have units but no ramp in a row.
+        """Convert PEMMDB per-unit MW/min ramp rates to fleet MW/h."""
         raw = raw.astype(float)
         mask = ~np.isnan(raw)
         if units.shape == raw.shape:
@@ -706,9 +704,6 @@ def load_crossborder_h2_exchanges(
         else:
             out[name] = values
 
-    # Net credit at the "XX" (unmodeled/rest-of-world) bucket: storage discharge
-    # behaves as extra supply (subtract from required import), while storage
-    # charge behaves as extra consumption (add to required import).
     mains = set(discharge_by_main) | set(charge_by_main)
     for main in mains:
         discharge = discharge_by_main.get(main)
@@ -732,11 +727,6 @@ def load_crossborder_h2_exchanges(
 
 
 # PLEXOS market-model result overrides
-#
-# load_plexos_h2_demand_profiles is an optional override used only when the
-# "Data Correction" option is enabled. load_plexos_wind_offshore_cf backs an
-# always-on base-pipeline fix (PECD has no offshore wind file at all for some
-# zones, e.g. BEOF) and runs regardless of that option.
 
 
 def load_plexos_h2_demand_profiles(

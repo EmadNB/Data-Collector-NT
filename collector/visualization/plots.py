@@ -111,7 +111,7 @@ def _capacity_by_zone_chart(
         rows.append(p)
 
     ncols = min(legend_ncols, len(used_techs))
-    nrows = -(-len(used_techs) // ncols)  # ceil division
+    nrows = -(-len(used_techs) // ncols)
     legend_holder = figure(
         width=1300, height=40 + nrows * 30,
         toolbar_location=None, outline_line_color=None,
@@ -119,11 +119,6 @@ def _capacity_by_zone_chart(
     legend_holder.axis.visible = False
     legend_holder.grid.visible = False
 
-    # A same-figure swatch renderer per technology: Bokeh resolves a legend
-    # item's swatch color from its *first* renderer, and that only renders
-    # reliably when the renderer belongs to the legend's own figure. The real
-    # cross-subplot renderers are still included so click_policy="hide" keeps
-    # toggling that technology's bars everywhere.
     legend_items = []
     for t in used_techs:
         swatch = legend_holder.scatter(x=[0], y=[0], marker="square", size=0, color=tech_colors[t])

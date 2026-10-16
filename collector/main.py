@@ -16,6 +16,7 @@ from collector.data.loader import (
     load_network_terminals,
     load_nodes,
     load_plexos_h2_demand_profiles,
+    load_plexos_implicit_dsr,
     load_plexos_wind_offshore_cf,
     load_reserve_requirements,
     load_tech_capacities,
@@ -192,6 +193,21 @@ def _pipeline(
             profiles_df["Hydrogen Demand Profile"] = plexos_h2["Hydrogen Demand Profile"]
         except FileNotFoundError as exc:
             print(f"Warning: PLEXOS result file not found, skipping H2 demand correction – {exc}")
+
+    print("\n=== Applying PLEXOS implicit DSR to electricity demand ===")
+    try:
+        dsr_i = load_plexos_implicit_dsr(zones, scenario, hours)
+        for e in profiles_df.get("Electricity Demand Profile", []):
+            shift = dsr_i.get(e["Code"])
+            if shift is None or not np.any(shift):
+                continue
+            demand = np.array(e["Data"], dtype=float)
+            n = min(len(demand), len(shift))
+            demand[:n] = demand[:n] - shift[:n]
+            e["Data"] = demand
+            print(f"  {e['Code']}: implicit DSR applied (peak shift {np.abs(shift).max():,.0f} MW)")
+    except FileNotFoundError as exc:
+        print(f"Warning: PLEXOS result file not found, skipping implicit DSR – {exc}")
 
     wind_offshore = profiles_df.setdefault("Wind_Offshore Profile", [])
     wind_offshore_by_zone = {e["Code"]: e for e in wind_offshore}

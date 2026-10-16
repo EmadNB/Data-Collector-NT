@@ -153,6 +153,7 @@ def export_zone_data(
     export_cols = export_df.filter(
         regex=rf"Exports_{re.escape(zone_name)}(_| )", axis=1
     ).copy()
+    export_cols = export_cols.loc[:, ~export_cols.columns.str.endswith("_SMR (MW/h)")]
     export_cols.index = export_cols.index + 1
     merged = hourly_out.merge(export_cols, left_index=True, right_index=True, how="outer")
 

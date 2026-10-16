@@ -706,19 +706,17 @@ def load_crossborder_h2_exchanges(
         else:
             out[name] = values
 
-    # Net credit at the "XX" (unmodeled/rest-of-world) bucket: SMR and storage
-    # discharge behave as extra supply (subtract from required import), while
-    # storage charge behaves as extra consumption (add to required import).
-    mains = set(smr_by_main) | set(discharge_by_main) | set(charge_by_main)
+    # Net credit at the "XX" (unmodeled/rest-of-world) bucket: storage discharge
+    # behaves as extra supply (subtract from required import), while storage
+    # charge behaves as extra consumption (add to required import).
+    mains = set(discharge_by_main) | set(charge_by_main)
     for main in mains:
-        smr = smr_by_main.get(main)
         discharge = discharge_by_main.get(main)
         charge = charge_by_main.get(main)
-        n = len(smr or discharge or charge or [])
+        n = len(discharge or charge or [])
         credit = [
             (charge[i] or 0 if charge else 0)
             - (discharge[i] or 0 if discharge else 0)
-            - (smr[i] or 0 if smr else 0)
             for i in range(n)
         ]
         name = f"H2Exports_{main}_XX (MW/h)"
@@ -726,6 +724,9 @@ def load_crossborder_h2_exchanges(
             out[name] = [(a or 0) + b for a, b in zip(out[name], credit)]
         else:
             out[name] = credit
+
+    for main, smr in smr_by_main.items():
+        out[f"H2Exports_{main}_SMR (MW/h)"] = [-(v or 0) for v in smr]
 
     return pd.DataFrame(out)
 
@@ -769,6 +770,31 @@ def load_plexos_h2_demand_profiles(
         data = series.get(str(code)[:2], np.zeros(selected_hours))
         results.append({"Code": code, "Year": None, "Data": np.asarray(data, dtype=float)})
     return {"Hydrogen Demand Profile": results}
+
+
+def load_plexos_implicit_dsr(
+    selected_zones: list[str],
+    scenario: int,
+    selected_hours: int,
+) -> dict[str, np.ndarray]:
+    filepath = f"inputs/MMStandardOutputFile_NT{scenario}_Plexos_CY2009_2.5_v40.xlsx"
+    wb = openpyxl.load_workbook(filepath, data_only=True, read_only=True)
+    ws = wb["Hourly Market Data"]
+    rows = list(ws.iter_rows(values_only=True))
+    ctry = rows[12]
+    dsr_col: dict[str, int] = {}
+    for c in range(2, len(ctry)):
+        code = str(ctry[c]) if ctry[c] else ""
+        if code.endswith("_DSRi") and code[:-5] in selected_zones:
+            dsr_col[code[:-5]] = c
+    series: dict[str, np.ndarray] = {z: np.zeros(selected_hours) for z in dsr_col}
+    for i, rw in enumerate(rows[13:13 + selected_hours]):
+        for z, c in dsr_col.items():
+            v = rw[c]
+            if isinstance(v, (int, float)):
+                series[z][i] = v
+    wb.close()
+    return series
 
 
 def load_plexos_wind_offshore_cf(

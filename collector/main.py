@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 
 import numpy as np
 
@@ -17,6 +18,7 @@ from collector.data.loader import (
     load_nodes,
     load_plexos_h2_demand_profiles,
     load_plexos_implicit_dsr,
+    load_plexos_marginal_prices,
     load_plexos_wind_offshore_cf,
     load_reserve_requirements,
     load_tech_capacities,
@@ -288,6 +290,18 @@ def _pipeline(
             reserve_df=reserve_df,
         )
     else:
+        print("\n=== Loading PLEXOS marginal prices for exchange end points ===")
+        price_nodes: set[str] = set()
+        for col in export_df.columns:
+            m = re.fullmatch(r"(H2)?Exports_[^_]+_(.+) \(MW/h\)", str(col))
+            if m and m.group(2) not in ("XX", "SMR"):
+                price_nodes.add(f"{m.group(2)[:2]}_H2" if m.group(1) else m.group(2))
+        try:
+            marginal_prices = load_plexos_marginal_prices(scenario, hours, price_nodes) if price_nodes else {}
+        except FileNotFoundError as exc:
+            print(f"Warning: PLEXOS result file not found, skipping marginal prices – {exc}")
+            marginal_prices = {}
+
         print("\n=== Exporting Excel workbooks ===")
         export_all_zones(
             tech_cap_df=tech_cap_df,
@@ -303,6 +317,7 @@ def _pipeline(
             output_folder=excel_dir,
             commodity_prices=commodity_prices,
             lignite_groups=lignite_groups,
+            marginal_prices=marginal_prices,
         )
 
     print("\n=== Pipeline complete ===")

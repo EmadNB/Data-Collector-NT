@@ -96,6 +96,7 @@ def export_zone_data(
     output_folder: str,
     commodity_prices: dict[str, float] | None = None,
     lignite_groups: dict[str, str] | None = None,
+    marginal_prices: dict[str, np.ndarray] | None = None,
 ) -> None:
     os.makedirs(output_folder, exist_ok=True)
 
@@ -154,6 +155,23 @@ def export_zone_data(
         regex=rf"Exports_{re.escape(zone_name)}(_| )", axis=1
     ).copy()
     export_cols = export_cols.loc[:, ~export_cols.columns.str.endswith("_SMR (MW/h)")]
+    if marginal_prices:
+        for col in list(export_cols.columns):
+            m = re.fullmatch(r"(H2)?Exports_[^_]+_(.+) \(MW/h\)", col)
+            if not m or m.group(2) == "XX":
+                continue
+            key = f"{m.group(2)[:2]}_H2" if m.group(1) else m.group(2)
+            price = marginal_prices.get(key)
+            if price is None:
+                continue
+            n = len(export_cols)
+            values = np.zeros(n)
+            values[:min(n, len(price))] = price[:n]
+            export_cols.insert(
+                export_cols.columns.get_loc(col) + 1,
+                f"{col[:-len(' (MW/h)')]} Marginal Price (EUR/MWh)",
+                values,
+            )
     export_cols.index = export_cols.index + 1
     merged = hourly_out.merge(export_cols, left_index=True, right_index=True, how="outer")
 
@@ -470,6 +488,7 @@ def export_all_zones(
     output_folder: str,
     commodity_prices: dict[str, float] | None = None,
     lignite_groups: dict[str, str] | None = None,
+    marginal_prices: dict[str, np.ndarray] | None = None,
 ) -> None:
     _h2_main = set(h2_main_zones(network_df, selected_zones).values())
     for _entry in profiles_df.get("Hydrogen Demand Profile", []):
@@ -490,6 +509,7 @@ def export_all_zones(
             output_folder=output_folder,
             commodity_prices=commodity_prices,
             lignite_groups=lignite_groups,
+            marginal_prices=marginal_prices,
         )
     export_network_data(network_df=network_df, output_folder=output_folder,
                         commodity_prices=commodity_prices, selected_zones=selected_zones)

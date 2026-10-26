@@ -714,11 +714,7 @@ def load_crossborder_h2_exchanges(
             - (discharge[i] or 0 if discharge else 0)
             for i in range(n)
         ]
-        name = f"H2Exports_{main}_XX (MW/h)"
-        if name in out:
-            out[name] = [(a or 0) + b for a, b in zip(out[name], credit)]
-        else:
-            out[name] = credit
+        out[f"H2Exports_{main}_Storage (MW/h)"] = credit
 
     for main, smr in smr_by_main.items():
         out[f"H2Exports_{main}_SMR (MW/h)"] = [-(v or 0) for v in smr]
@@ -787,32 +783,39 @@ def load_plexos_implicit_dsr(
     return series
 
 
-def load_plexos_marginal_prices(
+_PLEXOS_ENDPOINT_FIELDS = {
+    "_Mgl Cost": "Marginal Price (EUR/MWh)",
+    "_LOAD": "Demand (MW/h)",
+}
+
+
+def load_plexos_endpoint_data(
     scenario: int,
     selected_hours: int,
     nodes: set[str],
-) -> dict[str, np.ndarray]:
-    """Hourly PLEXOS marginal costs keyed by node (electricity) or ``<CC>_H2`` (hydrogen)."""
+) -> dict[str, dict[str, np.ndarray]]:
+    """Hourly PLEXOS marginal cost and demand per end point, keyed by column label then node (or ``<CC>_H2``)."""
     filepath = f"inputs/MMStandardOutputFile_NT{scenario}_Plexos_CY2009_2.5_v40.xlsx"
     wb = openpyxl.load_workbook(filepath, data_only=True, read_only=True)
-    series: dict[str, np.ndarray] = {}
+    series: dict[str, dict[str, np.ndarray]] = {label: {} for label in _PLEXOS_ENDPOINT_FIELDS.values()}
     for sheet in ("Hourly Market Data", "Hourly H2 Data"):
         if sheet not in wb.sheetnames:
             continue
         rows = list(wb[sheet].iter_rows(values_only=True))
         codes = rows[12]
-        price_col: dict[str, int] = {}
+        cols: list[tuple[str, str, int]] = []
         for c in range(2, len(codes)):
             code = str(codes[c]) if codes[c] else ""
-            if code.endswith("_Mgl Cost") and code[:-9] in nodes:
-                price_col[code[:-9]] = c
-        for node, c in price_col.items():
+            for suffix, label in _PLEXOS_ENDPOINT_FIELDS.items():
+                if code.endswith(suffix) and code[:-len(suffix)] in nodes:
+                    cols.append((label, code[:-len(suffix)], c))
+        for label, node, c in cols:
             arr = np.zeros(selected_hours)
             for i, rw in enumerate(rows[13:13 + selected_hours]):
                 v = rw[c]
                 if isinstance(v, (int, float)):
                     arr[i] = v
-            series[node] = arr
+            series[label][node] = arr
     wb.close()
     return series
 

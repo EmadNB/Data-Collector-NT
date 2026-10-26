@@ -18,7 +18,7 @@ from collector.data.loader import (
     load_nodes,
     load_plexos_h2_demand_profiles,
     load_plexos_implicit_dsr,
-    load_plexos_marginal_prices,
+    load_plexos_endpoint_data,
     load_plexos_wind_offshore_cf,
     load_reserve_requirements,
     load_tech_capacities,
@@ -290,17 +290,17 @@ def _pipeline(
             reserve_df=reserve_df,
         )
     else:
-        print("\n=== Loading PLEXOS marginal prices for exchange end points ===")
-        price_nodes: set[str] = set()
+        print("\n=== Loading PLEXOS marginal prices and demand for exchange end points ===")
+        endpoint_nodes: set[str] = set()
         for col in export_df.columns:
             m = re.fullmatch(r"(H2)?Exports_[^_]+_(.+) \(MW/h\)", str(col))
-            if m and m.group(2) not in ("XX", "SMR"):
-                price_nodes.add(f"{m.group(2)[:2]}_H2" if m.group(1) else m.group(2))
+            if m and m.group(2) not in ("XX", "SMR", "Storage"):
+                endpoint_nodes.add(f"{m.group(2)[:2]}_H2" if m.group(1) else m.group(2))
         try:
-            marginal_prices = load_plexos_marginal_prices(scenario, hours, price_nodes) if price_nodes else {}
+            endpoint_data = load_plexos_endpoint_data(scenario, hours, endpoint_nodes) if endpoint_nodes else {}
         except FileNotFoundError as exc:
-            print(f"Warning: PLEXOS result file not found, skipping marginal prices – {exc}")
-            marginal_prices = {}
+            print(f"Warning: PLEXOS result file not found, skipping end-point prices and demand – {exc}")
+            endpoint_data = {}
 
         print("\n=== Exporting Excel workbooks ===")
         export_all_zones(
@@ -317,7 +317,7 @@ def _pipeline(
             output_folder=excel_dir,
             commodity_prices=commodity_prices,
             lignite_groups=lignite_groups,
-            marginal_prices=marginal_prices,
+            endpoint_data=endpoint_data,
         )
 
     print("\n=== Pipeline complete ===")
